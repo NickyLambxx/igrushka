@@ -2,6 +2,17 @@ import pygame
 import math
 import pymunk
 
+# Фильтры коллизий: указывают, кто с кем сталкивается (категория объекта, с кем он может сталкиваться)
+BIRD_FILTER = pymunk.ShapeFilter(
+    categories=0b0001, mask=0b1010
+)  # Птица бьет блоки и стены
+TARGET_FILTER = pymunk.ShapeFilter(
+    categories=0b0010, mask=0b1011
+)  # Блоки бьют птицу, блоки и стены
+DEBRIS_FILTER = pymunk.ShapeFilter(
+    categories=0b0100, mask=0b1000
+)  # Обломки бьют ТОЛЬКО стены (чтобы не взрываться внутри друг друга)
+
 
 class MainBird(pygame.sprite.Sprite):
     def __init__(self, start_x, start_y, size, space):
@@ -9,11 +20,10 @@ class MainBird(pygame.sprite.Sprite):
         self.space = space
         self.start_x = start_x
         self.start_y = start_y
-        self.size = size
+        self.size = int(size)
 
-        # PyMunk: Инициализация физического тела
         mass = 5.0
-        radius = size // 2
+        radius = self.size // 2
         moment = pymunk.moment_for_circle(mass, 0, radius)
         self.body = pymunk.Body(mass, moment, body_type=pymunk.Body.KINEMATIC)
         self.body.position = (start_x, start_y)
@@ -21,12 +31,13 @@ class MainBird(pygame.sprite.Sprite):
         self.shape = pymunk.Circle(self.body, radius)
         self.shape.elasticity = 0.5
         self.shape.friction = 0.8
+        self.shape.filter = BIRD_FILTER
         self.space.add(self.body, self.shape)
 
         self.original_image = None
-        self.image = pygame.Surface((size, size))
+        self.image = pygame.Surface((self.size, self.size))
         self.rect = self.image.get_rect(center=(start_x, start_y))
-        self.mask = pygame.mask.Mask((size, size))
+        self.mask = pygame.mask.Mask((self.size, self.size))
 
         self.state = "idle"
         self.tumble_timer = 0
@@ -41,7 +52,6 @@ class MainBird(pygame.sprite.Sprite):
         self.jump_start_pos = (0, 0)
         self.jump_image = None
 
-    # Динамическая связь физики и графики
     @property
     def x(self):
         return self.body.position.x
@@ -57,6 +67,18 @@ class MainBird(pygame.sprite.Sprite):
     @y.setter
     def y(self, value):
         self.body.position = (self.body.position.x, value)
+
+    def _prevent_physics_explosion(self):
+        """Защита от краша при расчете NaN координат"""
+        if (
+            math.isnan(self.body.position.x)
+            or math.isnan(self.body.position.y)
+            or math.isnan(self.body.angle)
+        ):
+            self.body.position = (self.start_x, self.start_y)
+            self.body.velocity = (0, 0)
+            self.body.angle = 0.0
+            self.body.angular_velocity = 0.0
 
     def kill(self):
         if hasattr(self, "shape") and self.shape in self.space.shapes:
@@ -92,6 +114,7 @@ class MainBird(pygame.sprite.Sprite):
         self.update_rect()
 
     def update_rect(self):
+        self._prevent_physics_explosion()
         if self.original_image:
             self.image = pygame.transform.rotate(
                 self.original_image, math.degrees(-self.body.angle)
@@ -123,7 +146,6 @@ class MainBird(pygame.sprite.Sprite):
         vx = power * math.cos(angle)
         vy = power * math.sin(angle)
 
-        # Перевод пикселей/кадр в пиксели/сек для PyMunk
         self.body.velocity = (vx * 60, vy * 60)
 
         if self.type_index == 2:
@@ -135,6 +157,8 @@ class MainBird(pygame.sprite.Sprite):
 
     def update(self, dt, gravity, ground_level, screen_width, screen_height):
         event = None
+        self._prevent_physics_explosion()
+
         if self.state in ["flying", "tumbling"]:
             if self.type_index == 4 and self.state == "flying":
                 self.body.angular_velocity = -15.0
@@ -183,9 +207,9 @@ class Target(pygame.sprite.Sprite):
     def __init__(self, x, y, vx, vy, size, space, image):
         super().__init__()
         self.space = space
-        self.size = size
-        if image.get_size() != (size, size):
-            self.original_image = pygame.transform.scale(image, (size, size))
+        self.size = int(size)
+        if image.get_size() != (self.size, self.size):
+            self.original_image = pygame.transform.scale(image, (self.size, self.size))
         else:
             self.original_image = image
         self.image = self.original_image
@@ -193,7 +217,7 @@ class Target(pygame.sprite.Sprite):
         self.rect = self.image.get_rect(center=(x, y))
 
         mass = 1.0
-        radius = size // 2
+        radius = self.size // 2
         moment = pymunk.moment_for_circle(mass, 0, radius)
         self.body = pymunk.Body(mass, moment)
         self.body.position = (x, y)
@@ -201,6 +225,7 @@ class Target(pygame.sprite.Sprite):
         self.shape = pymunk.Circle(self.body, radius)
         self.shape.elasticity = 0.4
         self.shape.friction = 0.6
+        self.shape.filter = TARGET_FILTER
         self.space.add(self.body, self.shape)
 
     @property
@@ -217,6 +242,14 @@ class Target(pygame.sprite.Sprite):
         super().kill()
 
     def update(self, dt, screen_width, screen_height):
+        if (
+            math.isnan(self.body.position.x)
+            or math.isnan(self.body.position.y)
+            or math.isnan(self.body.angle)
+        ):
+            self.body.position = (100, 100)
+            self.body.angle = 0.0
+
         self.image = pygame.transform.rotate(
             self.original_image, math.degrees(-self.body.angle)
         )
@@ -228,9 +261,9 @@ class Obstacle(pygame.sprite.Sprite):
     def __init__(self, x, y, vx, vy, size, space, image):
         super().__init__()
         self.space = space
-        self.size = size
-        if image.get_size() != (size, size):
-            self.original_image = pygame.transform.scale(image, (size, size))
+        self.size = int(size)
+        if image.get_size() != (self.size, self.size):
+            self.original_image = pygame.transform.scale(image, (self.size, self.size))
         else:
             self.original_image = image
         self.image = self.original_image
@@ -238,13 +271,14 @@ class Obstacle(pygame.sprite.Sprite):
         self.rect = self.image.get_rect(center=(x, y))
 
         mass = 3.0
-        moment = pymunk.moment_for_box(mass, (size, size))
+        moment = pymunk.moment_for_box(mass, (self.size, self.size))
         self.body = pymunk.Body(mass, moment)
         self.body.position = (x, y)
         self.body.velocity = (vx * 60, vy * 60)
-        self.shape = pymunk.Poly.create_box(self.body, (size, size))
+        self.shape = pymunk.Poly.create_box(self.body, (self.size, self.size))
         self.shape.elasticity = 0.2
         self.shape.friction = 0.8
+        self.shape.filter = TARGET_FILTER
         self.space.add(self.body, self.shape)
 
     @property
@@ -261,6 +295,14 @@ class Obstacle(pygame.sprite.Sprite):
         super().kill()
 
     def update(self, dt, screen_width, screen_height):
+        if (
+            math.isnan(self.body.position.x)
+            or math.isnan(self.body.position.y)
+            or math.isnan(self.body.angle)
+        ):
+            self.body.position = (100, 100)
+            self.body.angle = 0.0
+
         self.image = pygame.transform.rotate(
             self.original_image, math.degrees(-self.body.angle)
         )
@@ -272,9 +314,9 @@ class SmallBird(pygame.sprite.Sprite):
     def __init__(self, x, y, vx, vy, size, space, image):
         super().__init__()
         self.space = space
-        self.size = size
-        if image.get_size() != (size, size):
-            self.original_image = pygame.transform.scale(image, (size, size))
+        self.size = int(size)
+        if image.get_size() != (self.size, self.size):
+            self.original_image = pygame.transform.scale(image, (self.size, self.size))
         else:
             self.original_image = image
         self.image = self.original_image
@@ -282,7 +324,7 @@ class SmallBird(pygame.sprite.Sprite):
         self.rect = self.image.get_rect(center=(x, y))
 
         mass = 0.5
-        radius = size // 2
+        radius = self.size // 2
         moment = pymunk.moment_for_circle(mass, 0, radius)
         self.body = pymunk.Body(mass, moment)
         self.body.position = (x, y)
@@ -290,6 +332,7 @@ class SmallBird(pygame.sprite.Sprite):
         self.shape = pymunk.Circle(self.body, radius)
         self.shape.elasticity = 0.5
         self.shape.friction = 0.8
+        self.shape.filter = DEBRIS_FILTER
         self.space.add(self.body, self.shape)
 
         self.state = "flying"
@@ -310,6 +353,14 @@ class SmallBird(pygame.sprite.Sprite):
 
     def update(self, dt, gravity, ground_level):
         event = None
+        if (
+            math.isnan(self.body.position.x)
+            or math.isnan(self.body.position.y)
+            or math.isnan(self.body.angle)
+        ):
+            self.body.position = (100, 100)
+            self.body.angle = 0.0
+
         if self.state == "flying":
             if self.y >= ground_level - self.size // 2:
                 self.state = "tumbling"
@@ -333,22 +384,23 @@ class DefeatedPig(pygame.sprite.Sprite):
     def __init__(self, x, y, vy, size, space, image):
         super().__init__()
         self.space = space
-        self.size = size
-        if image.get_size() != (size, size):
-            self.image = pygame.transform.scale(image, (size, size))
+        self.size = int(size)
+        if image.get_size() != (self.size, self.size):
+            self.image = pygame.transform.scale(image, (self.size, self.size))
         else:
             self.image = image
         self.rect = self.image.get_rect(center=(x, y))
 
         mass = 1.0
-        radius = size // 2
+        radius = self.size // 2
         moment = pymunk.moment_for_circle(mass, 0, radius)
         self.body = pymunk.Body(mass, moment)
         self.body.position = (x, y)
-        self.body.velocity = ((x % 200 - 100) * 2, vy * 60)
+        self.body.velocity = (random.uniform(-100, 100), vy * 60)
         self.shape = pymunk.Circle(self.body, radius)
         self.shape.elasticity = 0.3
         self.shape.friction = 0.9
+        self.shape.filter = DEBRIS_FILTER
         self.space.add(self.body, self.shape)
 
         self.on_ground = False
@@ -369,6 +421,9 @@ class DefeatedPig(pygame.sprite.Sprite):
 
     def update(self, dt, gravity, ground_level):
         event = None
+        if math.isnan(self.body.position.x) or math.isnan(self.body.position.y):
+            self.body.position = (100, 100)
+
         if not self.on_ground:
             if self.y >= ground_level - self.size // 2:
                 self.on_ground = True
