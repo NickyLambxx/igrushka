@@ -2,8 +2,9 @@ import pygame
 import math
 
 
-class MainBird:
+class MainBird(pygame.sprite.Sprite):
     def __init__(self, start_x, start_y, size):
+        super().__init__()
         self.start_x = start_x
         self.start_y = start_y
         self.size = size
@@ -11,14 +12,15 @@ class MainBird:
         self.y = float(start_y)
         self.vx = 0.0
         self.vy = 0.0
+
+        self.original_image = None
+        self.image = None
         self.rect = pygame.Rect(start_x - size // 2, start_y - size // 2, size, size)
 
         self.state = "idle"
         self.angle = 0.0
         self.angular_velocity = 0.0
         self.tumble_timer = 0
-
-        self.image = None
         self.type_index = 0
 
         self.boost_available = False
@@ -31,8 +33,13 @@ class MainBird:
         self.jump_image = None
 
     def set_image(self, img, type_index):
-        self.image = img
+        if img.get_size() != (self.size, self.size):
+            self.original_image = pygame.transform.scale(img, (self.size, self.size))
+        else:
+            self.original_image = img
+        self.image = self.original_image
         self.type_index = type_index
+        self.update_rect()
 
     def reset_to_sling(self):
         self.x = self.start_x
@@ -49,7 +56,10 @@ class MainBird:
         self.update_rect()
 
     def update_rect(self):
-        self.rect.center = (int(self.x), int(self.y))
+        if self.image:
+            self.rect = self.image.get_rect(center=(int(self.x), int(self.y)))
+        else:
+            self.rect.center = (int(self.x), int(self.y))
 
     def start_drag(self):
         self.state = "dragging"
@@ -88,7 +98,6 @@ class MainBird:
             self.vy += gravity * dt_factor
             if self.type_index == 4:
                 self.angle -= 15 * dt_factor
-            self.update_rect()
 
             if self.y >= ground_level - self.size // 2:
                 self.state = "tumbling"
@@ -96,7 +105,6 @@ class MainBird:
                 self.y = ground_level - self.size // 2
                 self.vy = 0
                 self.angular_velocity = self.vx * -1.5
-                self.update_rect()
                 event = "hit_ground"
 
             elif (
@@ -111,9 +119,7 @@ class MainBird:
             self.tumble_timer -= 1 * dt_factor
             self.x += self.vx * dt_factor
             self.angle += self.angular_velocity * dt_factor
-            self.update_rect()
 
-            # Трение с учетом dt
             self.vx *= 0.95**dt_factor
             self.angular_velocity *= 0.99**dt_factor
 
@@ -131,38 +137,38 @@ class MainBird:
             self.x = sx + (ex - sx) * p
             parabola_offset = 150 * (self.size / 50.0) * math.sin(p * math.pi)
             self.y = sy + (ey - sy) * p - parabola_offset
-            self.update_rect()
             if self.jump_progress >= 1.0:
                 self.state = "idle"
-                self.image = self.jump_image
+                self.set_image(self.jump_image, self.type_index)
                 self.jump_image = None
                 self.jump_progress = 0
                 self.reset_to_sling()
                 event = "jump_complete"
 
-        return event
+        if self.original_image and self.state in ["flying", "tumbling"]:
+            if self.type_index == 4 or self.state == "tumbling":
+                self.image = pygame.transform.rotate(self.original_image, self.angle)
+            else:
+                self.image = self.original_image
+        elif self.original_image:
+            self.image = self.original_image
 
-    def draw(self, screen):
-        if not self.image or self.state == "dead":
-            return
-        if self.state in ["flying", "tumbling"] and (
-            self.type_index == 4 or self.state == "tumbling"
-        ):
-            rotated = pygame.transform.rotate(self.image, self.angle)
-            new_rect = rotated.get_rect(center=self.rect.center)
-            screen.blit(rotated, new_rect)
-        else:
-            screen.blit(self.image, self.rect)
+        self.update_rect()
+        return event
 
 
 class Target(pygame.sprite.Sprite):
-    def __init__(self, rect, vx=0.0, vy=0.0):
+    def __init__(self, rect, vx, vy, image):
         super().__init__()
-        self.rect = rect
+        if image.get_size() != (rect.width, rect.height):
+            self.image = pygame.transform.scale(image, (rect.width, rect.height))
+        else:
+            self.image = image
+        self.rect = self.image.get_rect(center=rect.center)
         self.vx = vx
         self.vy = vy
-        self.x = float(rect.x)
-        self.y = float(rect.y)
+        self.x = float(self.rect.x)
+        self.y = float(self.rect.y)
 
     def update(self, dt, screen_width, screen_height):
         dt_factor = dt * 60.0
@@ -179,13 +185,17 @@ class Target(pygame.sprite.Sprite):
 
 
 class Obstacle(pygame.sprite.Sprite):
-    def __init__(self, rect, vx=0.0, vy=0.0):
+    def __init__(self, rect, vx, vy, image):
         super().__init__()
-        self.rect = rect
+        if image.get_size() != (rect.width, rect.height):
+            self.image = pygame.transform.scale(image, (rect.width, rect.height))
+        else:
+            self.image = image
+        self.rect = self.image.get_rect(center=rect.center)
         self.vx = vx
         self.vy = vy
-        self.x = float(rect.x)
-        self.y = float(rect.y)
+        self.x = float(self.rect.x)
+        self.y = float(self.rect.y)
 
     def update(self, dt, screen_width, screen_height):
         dt_factor = dt * 60.0
@@ -202,14 +212,19 @@ class Obstacle(pygame.sprite.Sprite):
 
 
 class SmallBird(pygame.sprite.Sprite):
-    def __init__(self, x, y, vx, vy, size):
+    def __init__(self, x, y, vx, vy, size, image):
         super().__init__()
+        if image.get_size() != (size, size):
+            self.original_image = pygame.transform.scale(image, (size, size))
+        else:
+            self.original_image = image
+        self.image = self.original_image
+        self.rect = self.image.get_rect(center=(x, y))
         self.x = float(x)
         self.y = float(y)
         self.vx = float(vx)
         self.vy = float(vy)
         self.size = size
-        self.rect = pygame.Rect(x - size // 2, y - size // 2, size, size)
         self.state = "flying"
         self.tumble_timer = 0
         self.angle = 0.0
@@ -222,7 +237,6 @@ class SmallBird(pygame.sprite.Sprite):
             self.x += self.vx * dt_factor
             self.y += self.vy * dt_factor
             self.vy += gravity * dt_factor
-            self.rect.center = (int(self.x), int(self.y))
             if self.y >= ground_level - self.size // 2:
                 self.state = "tumbling"
                 self.tumble_timer = 60
@@ -234,7 +248,6 @@ class SmallBird(pygame.sprite.Sprite):
             self.tumble_timer -= 1 * dt_factor
             self.x += self.vx * dt_factor
             self.angle += self.angular_velocity * dt_factor
-            self.rect.centerx = int(self.x)
 
             self.vx *= 0.95**dt_factor
             self.angular_velocity *= 0.99**dt_factor
@@ -244,18 +257,23 @@ class SmallBird(pygame.sprite.Sprite):
             if self.tumble_timer <= 0 or self.vx == 0:
                 self.state = "dead"
                 self.kill()
-        return event
 
-    def draw(self, screen, image):
-        if self.state != "dead":
-            rotated = pygame.transform.rotate(image, self.angle)
-            new_rect = rotated.get_rect(center=self.rect.center)
-            screen.blit(rotated, new_rect)
+        if self.angle != 0:
+            self.image = pygame.transform.rotate(self.original_image, self.angle)
+        else:
+            self.image = self.original_image
+        self.rect = self.image.get_rect(center=(int(self.x), int(self.y)))
+        return event
 
 
 class DefeatedPig(pygame.sprite.Sprite):
-    def __init__(self, x, y, vy, size):
+    def __init__(self, x, y, vy, size, image):
         super().__init__()
+        if image.get_size() != (size, size):
+            self.image = pygame.transform.scale(image, (size, size))
+        else:
+            self.image = image
+        self.rect = self.image.get_rect(center=(x, y))
         self.x = float(x)
         self.y = float(y)
         self.vy = float(vy)
@@ -279,10 +297,6 @@ class DefeatedPig(pygame.sprite.Sprite):
             if self.timer <= 0:
                 event = "dead"
                 self.kill()
-        return event
 
-    def draw(self, screen, image):
-        rect = pygame.Rect(
-            self.x - self.size // 2, self.y - self.size // 2, self.size, self.size
-        )
-        screen.blit(image, rect)
+        self.rect.center = (int(self.x), int(self.y))
+        return event

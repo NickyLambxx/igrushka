@@ -398,6 +398,7 @@ def update_campaign_board(dt, game_state):
 def split_bird(game_state):
     bird = game_state["main_bird"]
     sz = game_state["small_object_size"]
+    img = game_state["images"]["small_bird_img"]
     for i in range(3):
         angle = math.radians(120 * i)
         game_state["small_birds"].add(
@@ -407,6 +408,7 @@ def split_bird(game_state):
                 bird.vx + math.cos(angle) * 3,
                 bird.vy + math.sin(angle) * 3,
                 sz,
+                img,
             )
         )
     if game_state["sound_on"] and game_state["sounds"].get("split_sound"):
@@ -523,6 +525,9 @@ def reset_game(game_state):
     )
 
     sm = SPEED_MULTIPLIER.get(game_state["difficulty"], 0)
+    target_img = game_state["images"]["target_img"]
+    obs_img = game_state["images"]["brick_img"]
+
     for _ in range(num_targets):
         while True:
             nr = create_target(
@@ -546,6 +551,7 @@ def reset_game(game_state):
                             if sm > 0
                             else 0
                         ),
+                        target_img,
                     )
                 )
                 break
@@ -572,6 +578,7 @@ def reset_game(game_state):
                             if sm > 0
                             else 0
                         ),
+                        obs_img,
                     )
                 )
                 break

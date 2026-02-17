@@ -1577,6 +1577,7 @@ class GameplayState(State):
                     )
 
             update_feathers(game_state["feather_particles"], dt)
+            td_img = game_state["images"]["target_defeated_img"]
 
             if mb and mb.state in ["flying", "tumbling"]:
                 for t in pygame.sprite.spritecollide(
@@ -1608,6 +1609,7 @@ class GameplayState(State):
                                     x.rect.centery,
                                     random.uniform(-2, 0),
                                     game_state["object_size"],
+                                    td_img,
                                 )
                             )
                             x.kill()
@@ -1633,6 +1635,7 @@ class GameplayState(State):
                                 t.rect.centery,
                                 -abs(mb.vy * 0.2),
                                 game_state["object_size"],
+                                td_img,
                             )
                         )
                         t.kill()
@@ -1677,6 +1680,7 @@ class GameplayState(State):
                                 t.rect.centery,
                                 0,
                                 game_state["object_size"],
+                                td_img,
                             )
                         )
                         t.kill()
@@ -1707,6 +1711,7 @@ class GameplayState(State):
                 dp.kill()
                 if game_state["game_mode"] not in ["training", "developer", "campaign"]:
                     sm = SPEED_MULTIPLIER.get(game_state["difficulty"], 0)
+                    t_img = game_state["images"]["target_img"]
                     if game_state["game_mode"] != "sharpshooter":
                         while True:
                             nr = create_target(
@@ -1738,6 +1743,7 @@ class GameplayState(State):
                                             if sm > 0
                                             else 0
                                         ),
+                                        t_img,
                                     )
                                 )
                                 break
@@ -1763,6 +1769,7 @@ class GameplayState(State):
                                     if sm > 0
                                     else 0
                                 ),
+                                t_img,
                             )
                         )
                         game_state["target_timer_start"] = time.time()
@@ -1796,6 +1803,7 @@ class GameplayState(State):
                     game_state["combo"] = 0
                     if game_state["lives"] > 0:
                         sm = SPEED_MULTIPLIER.get(game_state["difficulty"], 0)
+                        t_img = game_state["images"]["target_img"]
                         game_state["targets"].add(
                             Target(
                                 create_target(
@@ -1817,6 +1825,7 @@ class GameplayState(State):
                                     if sm > 0
                                     else 0
                                 ),
+                                t_img,
                             )
                         )
                         game_state["target_timer_start"] = time.time()
@@ -2150,20 +2159,18 @@ class GameplayState(State):
                     int(3 * sc),
                 )
 
-        if mb:
+        # Отрисовка главной птицы
+        if mb and mb.state != "dead":
             if mb.state == "jumping" and mb.jump_image:
                 screen.blit(mb.jump_image, (mb.x - mb.size // 2, mb.y - mb.size // 2))
-            elif mb.state != "dead":
-                mb.draw(screen)
+            elif mb.image:
+                screen.blit(mb.image, mb.rect)
 
-        for t in game_state.get("targets", []):
-            screen.blit(game_state["images"]["target_img"], t.rect)
-        for o in game_state.get("obstacles", []):
-            screen.blit(game_state["images"]["brick_img"], o.rect)
-        for d in game_state.get("defeated_pigs", []):
-            d.draw(screen, game_state["images"]["target_defeated_img"])
-        for s in game_state.get("small_birds", []):
-            s.draw(screen, game_state["images"]["small_bird_img"])
+        # МАССОВАЯ ОТРИСОВКА ЧЕРЕЗ GROUP.DRAW()
+        game_state.get("targets", pygame.sprite.Group()).draw(screen)
+        game_state.get("obstacles", pygame.sprite.Group()).draw(screen)
+        game_state.get("defeated_pigs", pygame.sprite.Group()).draw(screen)
+        game_state.get("small_birds", pygame.sprite.Group()).draw(screen)
 
         if game_state["sound_on"]:
             screen.blit(
