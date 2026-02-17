@@ -2,8 +2,38 @@ import pygame
 import math
 import random
 import time
-from utils import draw_text, get_text
-from game_objects import CAMPAIGN_GRID_SIZE
+from utils import (
+    draw_text,
+    get_text,
+    create_trail_particle,
+    create_dust_particle,
+    create_spark_particle,
+    update_particles,
+    draw_particles,
+    draw_dashed_trajectory,
+    create_feather_explosion,
+    update_and_draw_feathers,
+    create_brick_shatter,
+    create_target,
+)
+from game_objects import (
+    CAMPAIGN_GRID_SIZE,
+    reset_game,
+    apply_screen_settings,
+    update_all_volumes,
+    play_music_track,
+    get_next_bird,
+    update_max_combo,
+    start_swap_animation,
+    split_bird,
+    activate_boomerang,
+    update_game_state,
+    update_campaign_board,
+)
+from entities import Target, DefeatedPig
+from settings import SPEED_MULTIPLIER
+from achievements import save_all_profiles_data, create_default_achievements
+from localization import LANGUAGES
 
 PEDIA_IMAGES = {
     "Красная Птица": ("bird_imgs", 0),
@@ -23,1289 +53,2391 @@ PEDIA_IMAGES = {
 }
 
 
-def draw_campaign_board(screen, images, fonts, game_state, mx, my, texts):
-    board_rect = game_state["campaign_grid_rect"]
-    cell_size = game_state["campaign_cell_size"]
-    board = game_state["campaign_board"]
+class StateManager:
+    def __init__(self):
+        self.states = {}
+        self.current_state = None
+        self.running = True
 
-    board_surface = pygame.Surface(board_rect.size, pygame.SRCALPHA)
-    board_surface.fill((0, 0, 0, 100))
+    def add_state(self, name, state):
+        self.states[name] = state
 
-    animated_grid_positions = set()
-    if game_state.get("campaign_is_swapping"):
-        anim = game_state["campaign_swap_anim"]
-        animated_grid_positions.add(anim["tile1_pos"])
-        animated_grid_positions.add(anim["tile2_pos"])
+    def change_state(self, name, game_state):
+        if self.current_state:
+            self.current_state.exit(game_state)
+        self.current_state = self.states[name]
+        self.current_state.enter(game_state)
 
-    if game_state.get("campaign_is_dragging_tile"):
-        animated_grid_positions.add(game_state["campaign_drag_start_tile"])
 
-    if board:
-        for r in range(CAMPAIGN_GRID_SIZE):
-            for c in range(CAMPAIGN_GRID_SIZE):
-                if (r, c) in animated_grid_positions:
-                    continue
+class State:
+    def enter(self, game_state):
+        pass
 
-                bird_index = board[r][c]
-                if bird_index is not None:
-                    alpha = 255
-                    size_factor = 0.9
+    def exit(self, game_state):
+        pass
 
-                    if (
-                        game_state.get("campaign_board_state") == "clearing"
-                        and (r, c) in game_state["campaign_matched_tiles"]
-                    ):
-                        progress = game_state["campaign_clear_progress"]
-                        alpha = int(255 * (1.0 - progress))
-                        size_factor = 0.9 * (1.0 - progress)
+    def handle_event(self, event, mx, my, game_state):
+        pass
 
-                    if alpha > 0:
-                        bird_img = images["bird_imgs"][bird_index]
-                        scaled_size = int(cell_size * size_factor)
-                        if scaled_size > 0:
-                            scaled_bird = pygame.transform.scale(
-                                bird_img, (scaled_size, scaled_size)
-                            )
-                            scaled_bird.set_alpha(alpha)
-                            img_rect = scaled_bird.get_rect(
-                                center=(
-                                    c * cell_size + cell_size / 2,
-                                    r * cell_size + cell_size / 2,
-                                )
-                            )
-                            board_surface.blit(scaled_bird, img_rect)
+    def update(self, game_state):
+        pass
 
-    def draw_animated_tile_at(bird_type, center_x, center_y, alpha=255):
-        img = pygame.transform.scale(
-            images["bird_imgs"][bird_type], (int(cell_size * 0.9), int(cell_size * 0.9))
-        )
-        img.set_alpha(alpha)
-        img_rect = img.get_rect(center=(center_x, center_y))
-        board_surface.blit(img, img_rect)
+    def draw(self, screen, mx, my, game_state):
+        pass
 
-    if game_state.get("campaign_is_swapping"):
-        anim = game_state["campaign_swap_anim"]
-        p = anim["progress"]
-        r1, c1 = anim["tile1_pos"]
-        r2, c2 = anim["tile2_pos"]
-        x1, y1 = c1 * cell_size + cell_size / 2, r1 * cell_size + cell_size / 2
-        x2, y2 = c2 * cell_size + cell_size / 2, r2 * cell_size + cell_size / 2
-        curr_x1 = x1 + (x2 - x1) * p
-        curr_y1 = y1 + (y2 - y1) * p
-        curr_x2 = x2 + (x1 - x2) * p
-        curr_y2 = y2 + (y1 - y2) * p
-        draw_animated_tile_at(anim["tile1_type"], curr_x1, curr_y1)
-        draw_animated_tile_at(anim["tile2_type"], curr_x2, curr_y2)
 
-    if game_state.get("campaign_is_dragging_tile"):
-        r, c = game_state["campaign_drag_start_tile"]
-        bird_type = board[r][c]
-        if bird_type is not None:
-            draw_animated_tile_at(
-                bird_type,
-                c * cell_size + cell_size / 2,
-                r * cell_size + cell_size / 2,
-                alpha=100,
+class MainMenuState(State):
+    def __init__(self):
+        self.buttons = {}
+
+    def handle_event(self, event, mx, my, game_state):
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            sm = game_state["state_manager"]
+            if self.buttons.get("start_btn") and self.buttons["start_btn"].collidepoint(
+                mx, my
+            ):
+                if game_state["game_mode"] == "campaign":
+                    sm.change_state("level_selection", game_state)
+                else:
+                    reset_game(game_state)
+                    sm.change_state("gameplay", game_state)
+            elif self.buttons.get("profile_btn") and self.buttons[
+                "profile_btn"
+            ].collidepoint(mx, my):
+                sm.change_state("profile_menu", game_state)
+            elif self.buttons.get("modes_btn") and self.buttons[
+                "modes_btn"
+            ].collidepoint(mx, my):
+                sm.change_state("game_mode_menu", game_state)
+            elif self.buttons.get("set_btn") and self.buttons["set_btn"].collidepoint(
+                mx, my
+            ):
+                sm.change_state("settings_menu", game_state)
+            elif self.buttons.get("achievements_btn") and self.buttons[
+                "achievements_btn"
+            ].collidepoint(mx, my):
+                game_state["achievements_viewing_profile"] = game_state[
+                    "current_profile"
+                ]
+                sm.change_state("achievements_menu", game_state)
+            elif self.buttons.get("birdpedia_btn") and self.buttons[
+                "birdpedia_btn"
+            ].collidepoint(mx, my):
+                sm.change_state("birdpedia_menu", game_state)
+            elif self.buttons.get("exit_btn") and self.buttons["exit_btn"].collidepoint(
+                mx, my
+            ):
+                sm.running = False
+
+            speaker_rect = pygame.Rect(
+                game_state["WIDTH"] - int(50 * game_state["scale_factor"]),
+                int(10 * game_state["scale_factor"]),
+                int(40 * game_state["scale_factor"]),
+                int(40 * game_state["scale_factor"]),
             )
-            drag_x = mx - board_rect.x
-            drag_y = my - board_rect.y
-            draw_animated_tile_at(bird_type, drag_x, drag_y, alpha=200)
+            if speaker_rect.collidepoint(mx, my):
+                game_state["sound_on"] = not game_state["sound_on"]
+                update_all_volumes(game_state)
 
-    def get_animated_y(tile_data, is_refilling=False):
-        p = tile_data["progress"]
-        r_end, _ = tile_data["end_pos"]
-        y_end = r_end * cell_size + cell_size / 2
-        y_start = (
-            (r_end + tile_data["start_y_offset"])
-            if is_refilling
-            else tile_data["start_pos"][0] * cell_size
-        ) + cell_size / 2
-        return y_start + (y_end - y_start) * p
+    def draw(self, screen, mx, my, game_state):
+        bg = game_state["images"]["menu_background"]
+        screen.blit(bg, bg.get_rect(center=screen.get_rect().center))
 
-    if game_state.get("campaign_board_state") == "falling":
-        for tile in game_state["campaign_falling_tiles"]:
-            draw_animated_tile_at(
-                tile["type"],
-                tile["end_pos"][1] * cell_size + cell_size / 2,
-                get_animated_y(tile),
+        self.buttons = {}
+        y_step = 50
+        start_y = game_state["HEIGHT"] // 2
+        keys = ["start_btn", "profile_btn", "modes_btn", "set_btn", "achievements_btn"]
+        text_keys = [
+            "start_game",
+            "profile",
+            "modes_difficulty",
+            "settings",
+            "achievements",
+        ]
+
+        hover_size = int(40 * game_state["scale_factor"])
+        hover_imgs = [
+            pygame.transform.scale(img, (hover_size, hover_size))
+            for img in game_state["images"]["bird_imgs"]
+        ]
+
+        for i, text_key in enumerate(text_keys):
+            text_surf, text_rect = draw_text(
+                get_text(game_state["texts"], text_key),
+                game_state["fonts"]["small_font"],
+                (0, 0, 0),
             )
-    if game_state.get("campaign_board_state") == "refilling":
-        for tile in game_state["campaign_refilling_tiles"]:
-            draw_animated_tile_at(
-                tile["type"],
-                tile["end_pos"][1] * cell_size + cell_size / 2,
-                get_animated_y(tile, True),
-            )
-
-    if game_state.get("campaign_selected_tile") and not game_state.get(
-        "campaign_is_swapping"
-    ):
-        r, c = game_state["campaign_selected_tile"]
-        pygame.draw.rect(
-            board_surface,
-            (255, 255, 0, 200),
-            (c * cell_size, r * cell_size, cell_size, cell_size),
-            4,
-            border_radius=5,
-        )
-
-    screen.blit(board_surface, board_rect.topleft)
-
-    score_text = f"{get_text(texts, 'score_colon')} {game_state['campaign_score']} / {game_state['campaign_target_score']}"
-    score_surf, _ = draw_text(score_text, fonts["small_font"], (0, 0, 0))
-    screen.blit(score_surf, (board_rect.left, board_rect.top - 40))
-
-    if game_state["sound_on"]:
-        screen.blit(images["speaker_on_img"], (game_state["WIDTH"] - 50, 10))
-    else:
-        screen.blit(images["speaker_off_img"], (game_state["WIDTH"] - 50, 10))
-
-    if game_state["paused"]:
-        screen.blit(images["resume_img"], (game_state["WIDTH"] - 100, 10))
-    else:
-        screen.blit(images["pause_img"], (game_state["WIDTH"] - 100, 10))
-
-    screen.blit(
-        images["lightbulb_img"],
-        (
-            game_state["WIDTH"] // 2 - int(30 * game_state["scale_factor"]),
-            int(10 * game_state["scale_factor"]),
-        ),
-    )
-
-    if game_state["campaign_level_complete"]:
-        overlay = pygame.Surface(
-            (game_state["WIDTH"], game_state["HEIGHT"]), pygame.SRCALPHA
-        )
-        overlay.fill((0, 0, 0, 180))
-        screen.blit(overlay, (0, 0))
-        win_surf, win_rect = draw_text(
-            get_text(texts, "campaign_win"), fonts["font"], (255, 215, 0)
-        )
-        win_rect.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2 - 50)
-        screen.blit(win_surf, win_rect)
-
-        buttons = {}
-        restart_surf, restart_btn = draw_text(
-            get_text(texts, "training_restart"), fonts["small_font"], (255, 255, 255)
-        )
-        restart_btn.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2 + 20)
-        if restart_btn.collidepoint(mx, my):
-            restart_surf, _ = draw_text(
-                get_text(texts, "training_restart"), fonts["small_font"], (255, 200, 0)
-            )
-        screen.blit(restart_surf, restart_btn)
-        buttons["restart_btn"] = restart_btn
+            text_rect.topleft = (game_state["WIDTH"] // 2 - 100, start_y + y_step * i)
+            if text_rect.collidepoint(mx, my):
+                text_surf, _ = draw_text(
+                    get_text(game_state["texts"], text_key),
+                    game_state["fonts"]["small_font"],
+                    (255, 200, 0),
+                )
+                screen.blit(
+                    hover_imgs[i],
+                    (
+                        text_rect.left - (hover_size + 15),
+                        text_rect.centery - hover_size // 2,
+                    ),
+                )
+            screen.blit(text_surf, text_rect)
+            self.buttons[keys[i]] = text_rect
 
         exit_surf, exit_btn = draw_text(
-            get_text(texts, "training_exit_to_menu"),
-            fonts["small_font"],
-            (255, 255, 255),
+            get_text(game_state["texts"], "exit"),
+            game_state["fonts"]["small_font"],
+            (0, 0, 0),
         )
-        exit_btn.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2 + 70)
+        exit_btn.bottomright = (game_state["WIDTH"] - 20, game_state["HEIGHT"] - 20)
         if exit_btn.collidepoint(mx, my):
             exit_surf, _ = draw_text(
-                get_text(texts, "training_exit_to_menu"),
-                fonts["small_font"],
+                get_text(game_state["texts"], "exit"),
+                game_state["fonts"]["small_font"],
                 (255, 200, 0),
             )
         screen.blit(exit_surf, exit_btn)
-        buttons["exit_btn"] = exit_btn
-        return buttons
-    return {}
+        self.buttons["exit_btn"] = exit_btn
 
-
-def draw_level_selection(screen, fonts, game_state, mx, my, texts):
-    buttons = {"levels": {}}
-    title_surf, title_rect = draw_text(
-        get_text(texts, "level_selection_title"), fonts["font"], (0, 0, 0)
-    )
-    title_rect.centerx = screen.get_width() // 2
-    title_rect.y = 80
-    screen.blit(title_surf, title_rect)
-
-    cols = 5
-    rows = 4
-    total_levels = 20
-    spacing = 100
-    radius = 35
-    start_x = (screen.get_width() - (cols - 1) * spacing) // 2
-    start_y = title_rect.bottom + 80
-
-    for i in range(total_levels):
-        col = i % cols
-        row = i // cols
-        x = start_x + col * spacing
-        y = start_y + row * spacing
-        level_rect = pygame.Rect(x - radius, y - radius, radius * 2, radius * 2)
-        color = (150, 200, 255) if level_rect.collidepoint(mx, my) else (100, 150, 255)
-        pygame.draw.circle(screen, color, (x, y), radius)
-        pygame.draw.circle(screen, (255, 255, 255), (x, y), radius, 3)
-        level_text_surf, _ = draw_text(str(i + 1), fonts["small_font"], (255, 255, 255))
-        level_text_rect = level_text_surf.get_rect(center=(x, y))
-        screen.blit(level_text_surf, level_text_rect)
-        buttons["levels"][i + 1] = level_rect
-
-    back_surf, back_btn = draw_text(
-        get_text(texts, "back"), fonts["small_font"], (0, 0, 0)
-    )
-    back_btn.bottomleft = (20, game_state["HEIGHT"] - 20)
-    if back_btn.collidepoint(mx, my):
-        back_surf, _ = draw_text(
-            get_text(texts, "back"), fonts["small_font"], (255, 200, 0)
+        pedia_surf, pedia_btn = draw_text(
+            get_text(game_state["texts"], "birdpedia"),
+            game_state["fonts"]["small_font"],
+            (0, 0, 0),
         )
-    screen.blit(back_surf, back_btn)
-    buttons["back_btn"] = back_btn
-    return buttons
+        pedia_btn.bottomleft = (20, game_state["HEIGHT"] - 20)
+        if pedia_btn.collidepoint(mx, my):
+            pedia_surf, _ = draw_text(
+                get_text(game_state["texts"], "birdpedia"),
+                game_state["fonts"]["small_font"],
+                (255, 200, 0),
+            )
+        screen.blit(pedia_surf, pedia_btn)
+        self.buttons["birdpedia_btn"] = pedia_btn
 
-
-def draw_campaign_hint_popup(screen, fonts, game_state, mx, my, texts):
-    buttons = {}
-    overlay = pygame.Surface(
-        (game_state["WIDTH"], game_state["HEIGHT"]), pygame.SRCALPHA
-    )
-    overlay.fill((0, 0, 0, 180))
-    screen.blit(overlay, (0, 0))
-    dialog_rect = pygame.Rect(0, 0, 700, 300)
-    dialog_rect.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2)
-    pygame.draw.rect(screen, (60, 60, 80), dialog_rect)
-    pygame.draw.rect(screen, (210, 210, 230), dialog_rect, 3)
-
-    title_surf, title_rect = draw_text(
-        get_text(texts, "campaign_hint_title"), fonts["small_font"], (255, 215, 0)
-    )
-    title_rect.centerx = dialog_rect.centerx
-    title_rect.y = dialog_rect.y + 20
-    screen.blit(title_surf, title_rect)
-
-    font = fonts["pedia_font"]
-    words = get_text(texts, "campaign_hint_text").split(" ")
-    line_spacing = font.get_linesize()
-    max_width = dialog_rect.width - 40
-    x, y = dialog_rect.left + 20, dialog_rect.y + 70
-    space = font.size(" ")[0]
-    for word in words:
-        word_surface = font.render(word, True, (255, 255, 255))
-        word_width, word_height = word_surface.get_size()
-        if x + word_width >= dialog_rect.left + max_width:
-            x = dialog_rect.left + 20
-            y += line_spacing
-        screen.blit(word_surface, (x, y))
-        x += word_width + space
-
-    close_surf, close_btn = draw_text(
-        get_text(texts, "hint_popup_close"), fonts["small_font"], (255, 255, 255)
-    )
-    close_btn.center = (dialog_rect.centerx, dialog_rect.bottom - 40)
-    if close_btn.collidepoint(mx, my):
-        close_surf, _ = draw_text(
-            get_text(texts, "hint_popup_close"), fonts["small_font"], (120, 255, 120)
+        screen.blit(
+            draw_text(
+                f"{get_text(game_state['texts'], 'profile_colon')} {game_state['current_profile']}",
+                game_state["fonts"]["info_font"],
+                (0, 0, 0),
+            )[0],
+            (10, 10),
         )
-    screen.blit(close_surf, close_btn)
-    buttons["close_btn"] = close_btn
-    return buttons
+        screen.blit(
+            draw_text(
+                f"{get_text(game_state['texts'], 'mode_colon')} {get_text(game_state['texts'], 'mode_map').get(game_state['game_mode'], 'Unknown')}",
+                game_state["fonts"]["info_font"],
+                (0, 0, 0),
+            )[0],
+            (10, 35),
+        )
+        screen.blit(
+            draw_text(
+                f"{get_text(game_state['texts'], 'difficulty_colon')} {get_text(game_state['texts'], game_state['difficulty'])}",
+                game_state["fonts"]["info_font"],
+                (0, 0, 0),
+            )[0],
+            (10, 60),
+        )
 
-
-def draw_menu(screen, images, fonts, game_state, mx, my, texts):
-    buttons = {}
-    y_step = 50
-    start_y = game_state["HEIGHT"] // 2
-    button_keys = [
-        "start_btn",
-        "profile_btn",
-        "modes_btn",
-        "set_btn",
-        "achievements_btn",
-    ]
-    button_text_keys = [
-        "start_game",
-        "profile",
-        "modes_difficulty",
-        "settings",
-        "achievements",
-    ]
-
-    hover_bird_size = int(40 * game_state["scale_factor"])
-    bird_hover_images = [
-        pygame.transform.scale(img, (hover_bird_size, hover_bird_size))
-        for img in images["bird_imgs"]
-    ]
-
-    for i, text_key in enumerate(button_text_keys):
-        y_pos = start_y + y_step * i
-        text = get_text(texts, text_key)
-        text_surf, text_rect = draw_text(text, fonts["small_font"], (0, 0, 0))
-        text_rect.topleft = (game_state["WIDTH"] // 2 - 100, y_pos)
-        if text_rect.collidepoint(mx, my):
-            text_surf, _ = draw_text(text, fonts["small_font"], (255, 200, 0))
+        if game_state["sound_on"]:
             screen.blit(
-                bird_hover_images[i],
-                (
-                    text_rect.left - (hover_bird_size + 15),
-                    text_rect.centery - hover_bird_size // 2,
-                ),
+                game_state["images"]["speaker_on_img"], (game_state["WIDTH"] - 50, 10)
             )
-        screen.blit(text_surf, text_rect)
-        buttons[button_keys[i]] = text_rect
-
-    exit_surf, exit_btn = draw_text(
-        get_text(texts, "exit"), fonts["small_font"], (0, 0, 0)
-    )
-    exit_btn.bottomright = (game_state["WIDTH"] - 20, game_state["HEIGHT"] - 20)
-    if exit_btn.collidepoint(mx, my):
-        exit_surf, _ = draw_text(
-            get_text(texts, "exit"), fonts["small_font"], (255, 200, 0)
-        )
-    screen.blit(exit_surf, exit_btn)
-    buttons["exit_btn"] = exit_btn
-
-    pedia_surf, pedia_btn = draw_text(
-        get_text(texts, "birdpedia"), fonts["small_font"], (0, 0, 0)
-    )
-    pedia_btn.bottomleft = (20, game_state["HEIGHT"] - 20)
-    if pedia_btn.collidepoint(mx, my):
-        pedia_surf, _ = draw_text(
-            get_text(texts, "birdpedia"), fonts["small_font"], (255, 200, 0)
-        )
-    screen.blit(pedia_surf, pedia_btn)
-    buttons["birdpedia_btn"] = pedia_btn
-
-    screen.blit(
-        draw_text(
-            f"{get_text(texts, 'profile_colon')} {game_state['current_profile']}",
-            fonts["info_font"],
-            (0, 0, 0),
-        )[0],
-        (10, 10),
-    )
-    screen.blit(
-        draw_text(
-            f"{get_text(texts, 'mode_colon')} {get_text(texts, 'mode_map').get(game_state['game_mode'], 'Unknown')}",
-            fonts["info_font"],
-            (0, 0, 0),
-        )[0],
-        (10, 35),
-    )
-    screen.blit(
-        draw_text(
-            f"{get_text(texts, 'difficulty_colon')} {get_text(texts, game_state['difficulty'])}",
-            fonts["info_font"],
-            (0, 0, 0),
-        )[0],
-        (10, 60),
-    )
-
-    if game_state["sound_on"]:
-        screen.blit(images["speaker_on_img"], (game_state["WIDTH"] - 50, 10))
-    else:
-        screen.blit(images["speaker_off_img"], (game_state["WIDTH"] - 50, 10))
-    if game_state["paused"]:
-        screen.blit(images["resume_img"], (game_state["WIDTH"] - 100, 10))
-    else:
-        screen.blit(images["pause_img"], (game_state["WIDTH"] - 100, 10))
-    return buttons
-
-
-def draw_profile_selection(screen, fonts, game_state, mx, my, texts):
-    buttons = {"profiles": {}, "delete_btns": {}}
-    y_pos = 280
-    for name in game_state["all_profiles_data"].keys():
-        color = (0, 150, 0) if name == game_state["current_profile"] else (0, 0, 0)
-        text_surf, text_rect = draw_text(name, fonts["small_font"], color)
-        text_rect.topleft = (150, y_pos)
-        if text_rect.collidepoint(mx, my) and name != game_state["current_profile"]:
-            text_surf, _ = draw_text(name, fonts["small_font"], (255, 200, 0))
-        screen.blit(text_surf, text_rect)
-        buttons["profiles"][name] = text_rect
-        if name != "Guest":
-            delete_surf, delete_rect = draw_text("X", fonts["small_font"], (180, 0, 0))
-            delete_rect.left = text_rect.right + 20
-            delete_rect.centery = text_rect.centery
-            if delete_rect.collidepoint(mx, my):
-                delete_surf, _ = draw_text("X", fonts["small_font"], (255, 0, 0))
-            screen.blit(delete_surf, delete_rect)
-            buttons["delete_btns"][name] = delete_rect
-        y_pos += 40
-
-    input_box_rect = pygame.Rect(150, y_pos + 30, 250, 40)
-    color = (255, 200, 0) if game_state["profile_input_active"] else (200, 200, 200)
-    pygame.draw.rect(screen, (255, 255, 255), input_box_rect)
-    pygame.draw.rect(screen, color, input_box_rect, 2)
-    input_text = game_state["profile_input_text"] + (
-        "|" if game_state["profile_input_active"] and time.time() % 1 > 0.5 else ""
-    )
-    screen.blit(
-        draw_text(input_text, fonts["small_font"], (0, 0, 0))[0],
-        (input_box_rect.x + 10, input_box_rect.y + 5),
-    )
-    buttons["input_box"] = input_box_rect
-
-    create_surf, create_btn = draw_text(
-        get_text(texts, "create"), fonts["small_font"], (0, 0, 0)
-    )
-    create_btn.topleft = (input_box_rect.right + 20, input_box_rect.y)
-    if create_btn.collidepoint(mx, my):
-        create_surf, _ = draw_text(
-            get_text(texts, "create"), fonts["small_font"], (0, 180, 0)
-        )
-    screen.blit(create_surf, create_btn)
-    buttons["create_btn"] = create_btn
-
-    button_text = (
-        get_text(texts, "exit")
-        if game_state.get("initial_profile_selection", False)
-        else get_text(texts, "back")
-    )
-    back_surf, back_btn = draw_text(button_text, fonts["small_font"], (0, 0, 0))
-    back_btn.bottomleft = (20, game_state["HEIGHT"] - 20)
-    if back_btn.collidepoint(mx, my):
-        back_surf, _ = draw_text(button_text, fonts["small_font"], (255, 200, 0))
-    screen.blit(back_surf, back_btn)
-    buttons["back_btn"] = back_btn
-    return buttons
-
-
-def draw_profile_delete_confirmation(screen, fonts, game_state, mx, my, texts):
-    overlay = pygame.Surface(
-        (game_state["WIDTH"], game_state["HEIGHT"]), pygame.SRCALPHA
-    )
-    overlay.fill((0, 0, 0, 180))
-    screen.blit(overlay, (0, 0))
-    dialog_rect = pygame.Rect(0, 0, 600, 200)
-    dialog_rect.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2)
-    pygame.draw.rect(screen, (70, 50, 50), dialog_rect)
-    pygame.draw.rect(screen, (220, 200, 200), dialog_rect, 3)
-
-    question_surf, question_rect = draw_text(
-        f"{get_text(texts, 'confirm_delete_profile')} '{game_state['profile_to_delete']}'?",
-        fonts["small_font"],
-        (255, 255, 255),
-    )
-    question_rect.centerx = dialog_rect.centerx
-    question_rect.y = dialog_rect.y + 40
-    screen.blit(question_surf, question_rect)
-
-    yes_surf, yes_btn = draw_text(
-        get_text(texts, "yes"), fonts["small_font"], (200, 80, 80)
-    )
-    yes_btn.center = (dialog_rect.centerx - 80, dialog_rect.centery + 40)
-    if yes_btn.collidepoint(mx, my):
-        yes_surf, _ = draw_text(
-            get_text(texts, "yes"), fonts["small_font"], (255, 120, 120)
-        )
-    screen.blit(yes_surf, yes_btn)
-
-    no_surf, no_btn = draw_text(
-        get_text(texts, "no"), fonts["small_font"], (80, 200, 80)
-    )
-    no_btn.center = (dialog_rect.centerx + 80, dialog_rect.centery + 40)
-    if no_btn.collidepoint(mx, my):
-        no_surf, _ = draw_text(
-            get_text(texts, "no"), fonts["small_font"], (120, 255, 120)
-        )
-    screen.blit(no_surf, no_btn)
-    return {"yes_btn": yes_btn, "no_btn": no_btn}
-
-
-def draw_settings(screen, images, fonts, game_state, mx, my, texts):
-    buttons = {}
-    y_step = 70
-    start_y = game_state["HEIGHT"] // 2 + 50
-    button_info = {
-        "sound_btn": {"text_key": "sound", "y_offset": 0},
-        "screen_btn": {"text_key": "screen", "y_offset": y_step},
-        "language_btn": {"text_key": "language", "y_offset": y_step * 2},
-    }
-    for btn_key, info in button_info.items():
-        text = get_text(texts, info["text_key"])
-        text_surf, text_btn = draw_text(text, fonts["small_font"], (0, 0, 0))
-        text_btn.center = (game_state["WIDTH"] // 2, start_y + info["y_offset"])
-        if text_btn.collidepoint(mx, my):
-            text_surf, _ = draw_text(text, fonts["small_font"], (255, 200, 0))
-        screen.blit(text_surf, text_btn)
-        buttons[btn_key] = text_btn
-
-    back_surf, back_btn = draw_text(
-        get_text(texts, "back"), fonts["small_font"], (0, 0, 0)
-    )
-    back_btn.bottomleft = (20, game_state["HEIGHT"] - 20)
-    if back_btn.collidepoint(mx, my):
-        back_surf, _ = draw_text(
-            get_text(texts, "back"), fonts["small_font"], (255, 200, 0)
-        )
-    screen.blit(back_surf, back_btn)
-    buttons["back_btn"] = back_btn
-    return buttons
-
-
-def draw_sound_settings(screen, images, fonts, game_state, mx, my, texts):
-    buttons = {}
-    start_y = 280
-    y_step = 80
-    screen.blit(
-        draw_text(get_text(texts, "music_volume"), fonts["small_font"], (0, 0, 0))[0],
-        (game_state["WIDTH"] // 2 - 150, start_y),
-    )
-    music_slider = pygame.Rect(game_state["WIDTH"] // 2 - 150, start_y + 40, 300, 10)
-    music_knob_x = music_slider.x + int(game_state["music_volume"] * music_slider.width)
-    pygame.draw.rect(screen, (150, 150, 150), music_slider)
-    pygame.draw.rect(
-        screen,
-        (0, 150, 0),
-        (
-            music_slider.x,
-            music_slider.y,
-            music_knob_x - music_slider.x,
-            music_slider.height,
-        ),
-    )
-    pygame.draw.circle(screen, (0, 100, 0), (music_knob_x, music_slider.centery), 10)
-    buttons["music_slider"] = music_slider
-
-    screen.blit(
-        draw_text(get_text(texts, "sfx_volume"), fonts["small_font"], (0, 0, 0))[0],
-        (game_state["WIDTH"] // 2 - 150, start_y + y_step),
-    )
-    sfx_slider = pygame.Rect(
-        game_state["WIDTH"] // 2 - 150, start_y + y_step + 40, 300, 10
-    )
-    sfx_knob_x = sfx_slider.x + int(game_state["sfx_volume"] * sfx_slider.width)
-    pygame.draw.rect(screen, (150, 150, 150), sfx_slider)
-    pygame.draw.rect(
-        screen,
-        (0, 150, 0),
-        (sfx_slider.x, sfx_slider.y, sfx_knob_x - sfx_slider.x, sfx_slider.height),
-    )
-    pygame.draw.circle(screen, (0, 100, 0), (sfx_knob_x, sfx_slider.centery), 10)
-    buttons["sfx_slider"] = sfx_slider
-
-    track_y = start_y + y_step * 2
-    track_surf, track_rect = draw_text(
-        f"{get_text(texts, 'track_colon')} {game_state['current_music_track_index'] + 1}",
-        fonts["small_font"],
-        (0, 0, 0),
-    )
-    track_rect.center = (game_state["WIDTH"] // 2, track_y)
-    screen.blit(track_surf, track_rect)
-
-    prev_surf, prev_btn = draw_text(
-        get_text(texts, "prev_track"), fonts["small_font"], (0, 0, 0)
-    )
-    prev_btn.topright = (track_rect.left - 20, track_rect.top)
-    if prev_btn.collidepoint(mx, my):
-        prev_surf, _ = draw_text(
-            get_text(texts, "prev_track"), fonts["small_font"], (255, 200, 0)
-        )
-    screen.blit(prev_surf, prev_btn)
-    buttons["prev_track_btn"] = prev_btn
-
-    next_surf, next_btn = draw_text(
-        get_text(texts, "next_track"), fonts["small_font"], (0, 0, 0)
-    )
-    next_btn.topleft = (track_rect.right + 20, track_rect.top)
-    if next_btn.collidepoint(mx, my):
-        next_surf, _ = draw_text(
-            get_text(texts, "next_track"), fonts["small_font"], (255, 200, 0)
-        )
-    screen.blit(next_surf, next_btn)
-    buttons["next_track_btn"] = next_btn
-
-    back_surf, back_btn = draw_text(
-        get_text(texts, "back"), fonts["small_font"], (0, 0, 0)
-    )
-    back_btn.bottomleft = (20, game_state["HEIGHT"] - 20)
-    if back_btn.collidepoint(mx, my):
-        back_surf, _ = draw_text(
-            get_text(texts, "back"), fonts["small_font"], (255, 200, 0)
-        )
-    screen.blit(back_surf, back_btn)
-    buttons["back_btn"] = back_btn
-    return buttons
-
-
-def draw_screen_settings(screen, fonts, game_state, mx, my, texts):
-    buttons = {}
-    slider_width = 300
-    slider_x = game_state["WIDTH"] // 2 - slider_width // 2
-
-    screen.blit(
-        draw_text(get_text(texts, "brightness"), fonts["small_font"], (0, 0, 0))[0],
-        (slider_x, 300),
-    )
-    brightness_slider = pygame.Rect(slider_x, 340, slider_width, 10)
-    knob_x = brightness_slider.x + int(
-        game_state["brightness_slider_pos"] * brightness_slider.width
-    )
-    pygame.draw.rect(screen, (150, 150, 150), brightness_slider)
-    pygame.draw.rect(
-        screen,
-        (250, 250, 100),
-        (
-            brightness_slider.x,
-            brightness_slider.y,
-            knob_x - brightness_slider.x,
-            brightness_slider.height,
-        ),
-    )
-    pygame.draw.circle(screen, (200, 200, 50), (knob_x, brightness_slider.centery), 10)
-    buttons["brightness_slider"] = brightness_slider
-
-    screen.blit(
-        draw_text(get_text(texts, "resolution"), fonts["small_font"], (0, 0, 0))[0],
-        (slider_x, 420),
-    )
-    res_800x600 = (800, 600)
-    is_800 = game_state["pending_screen_mode"] == res_800x600
-    res800_surf, res800_btn = draw_text(
-        "800 x 600", fonts["small_font"], (0, 150, 0) if is_800 else (0, 0, 0)
-    )
-    res800_btn.topleft = (slider_x, 460)
-    if not is_800 and res800_btn.collidepoint(mx, my):
-        res800_surf, _ = draw_text("800 x 600", fonts["small_font"], (255, 200, 0))
-    screen.blit(res800_surf, res800_btn)
-    buttons["res_800_btn"] = res800_btn
-
-    is_fs = game_state["pending_screen_mode"] == "fullscreen"
-    res_fs_surf, res_fs_btn = draw_text(
-        get_text(texts, "fullscreen"),
-        fonts["small_font"],
-        (0, 150, 0) if is_fs else (0, 0, 0),
-    )
-    res_fs_btn.topleft = (res800_btn.right + 40, res800_btn.top)
-    if not is_fs and res_fs_btn.collidepoint(mx, my):
-        res_fs_surf, _ = draw_text(
-            get_text(texts, "fullscreen"), fonts["small_font"], (255, 200, 0)
-        )
-    screen.blit(res_fs_surf, res_fs_btn)
-    buttons["res_fullscreen_btn"] = res_fs_btn
-
-    back_surf, back_btn = draw_text(
-        get_text(texts, "back"), fonts["small_font"], (0, 0, 0)
-    )
-    back_btn.bottomleft = (20, game_state["HEIGHT"] - 20)
-    if back_btn.collidepoint(mx, my):
-        back_surf, _ = draw_text(
-            get_text(texts, "back"), fonts["small_font"], (255, 200, 0)
-        )
-    screen.blit(back_surf, back_btn)
-    buttons["back_btn"] = back_btn
-    return buttons
-
-
-def draw_language_selection(screen, fonts, game_state, mx, my, texts):
-    buttons = {}
-    ru_surf, ru_btn = draw_text(
-        "Русский",
-        fonts["small_font"],
-        (0, 150, 0) if game_state["language"] == "ru" else (0, 0, 0),
-    )
-    ru_btn.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2)
-    if ru_btn.collidepoint(mx, my) and game_state["language"] != "ru":
-        ru_surf, _ = draw_text("Русский", fonts["small_font"], (255, 200, 0))
-    screen.blit(ru_surf, ru_btn)
-    buttons["lang_ru_btn"] = ru_btn
-
-    en_surf, en_btn = draw_text(
-        "English",
-        fonts["small_font"],
-        (0, 150, 0) if game_state["language"] == "en" else (0, 0, 0),
-    )
-    en_btn.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2 + 60)
-    if en_btn.collidepoint(mx, my) and game_state["language"] != "en":
-        en_surf, _ = draw_text("English", fonts["small_font"], (255, 200, 0))
-    screen.blit(en_surf, en_btn)
-    buttons["lang_en_btn"] = en_btn
-
-    back_surf, back_btn = draw_text(
-        get_text(texts, "back"), fonts["small_font"], (0, 0, 0)
-    )
-    back_btn.bottomleft = (20, game_state["HEIGHT"] - 20)
-    if back_btn.collidepoint(mx, my):
-        back_surf, _ = draw_text(
-            get_text(texts, "back"), fonts["small_font"], (255, 200, 0)
-        )
-    screen.blit(back_surf, back_btn)
-    buttons["back_btn"] = back_btn
-    return buttons
-
-
-def draw_game_mode_selection(screen, images, fonts, game_state, mx, my, texts):
-    buttons = {}
-    y_step = 50
-    start_y = 220
-
-    def draw_mode_button(text_key, y_pos, key, mode_name):
-        text = get_text(texts, text_key)
-        color = (0, 150, 0) if game_state["game_mode"] == mode_name else (0, 0, 0)
-        text_surf, text_rect = draw_text(text, fonts["small_font"], color)
-        text_rect.topleft = (50, y_pos)
-        if text_rect.collidepoint(mx, my) and game_state["game_mode"] != mode_name:
-            text_surf, _ = draw_text(text, fonts["small_font"], (255, 200, 0))
-        screen.blit(text_surf, text_rect)
-        buttons[key] = text_rect
-
-    draw_mode_button("classic", start_y, "classic_btn", "classic")
-    draw_mode_button(
-        "sharpshooter", start_y + y_step, "sharpshooter_btn", "sharpshooter"
-    )
-    draw_mode_button("obstacle_mode", start_y + y_step * 2, "obstacle_btn", "obstacle")
-    draw_mode_button("campaign", start_y + y_step * 3, "campaign_btn", "campaign")
-    draw_mode_button("training", start_y + y_step * 4, "training_btn", "training")
-    draw_mode_button("dev_mode", start_y + y_step * 5, "developer_btn", "developer")
-
-    if game_state["game_mode"] in ["classic", "sharpshooter", "obstacle"]:
-        slider = pygame.Rect(400, 350, 300, 10)
-        pygame.draw.rect(screen, (200, 200, 200), slider)
-        knob_pos = (
-            slider.x + 10
-            if game_state["difficulty"] == "easy"
-            else (
-                slider.centerx
-                if game_state["difficulty"] == "medium"
-                else slider.right - 10
+        else:
+            screen.blit(
+                game_state["images"]["speaker_off_img"], (game_state["WIDTH"] - 50, 10)
             )
-        )
-        pygame.draw.circle(screen, (255, 0, 0), (knob_pos, slider.centery), 10)
-
-        screen.blit(
-            draw_text(get_text(texts, "easy"), fonts["small_font"], (0, 0, 0))[0],
-            (slider.x, slider.y + 15),
-        )
-        med_surf = draw_text(get_text(texts, "medium"), fonts["small_font"], (0, 0, 0))[
-            0
-        ]
-        screen.blit(
-            med_surf, (slider.centerx - med_surf.get_width() // 2, slider.y + 15)
-        )
-        hard_surf = draw_text(get_text(texts, "hard"), fonts["small_font"], (0, 0, 0))[
-            0
-        ]
-        screen.blit(hard_surf, (slider.right - hard_surf.get_width(), slider.y + 15))
-        buttons["difficulty_slider"] = slider
-
-    back_surf, back_btn = draw_text(
-        get_text(texts, "back"), fonts["small_font"], (0, 0, 0)
-    )
-    back_btn.bottomleft = (20, game_state["HEIGHT"] - 20)
-    if back_btn.collidepoint(mx, my):
-        back_surf, _ = draw_text(
-            get_text(texts, "back"), fonts["small_font"], (255, 200, 0)
-        )
-    screen.blit(back_surf, back_btn)
-    buttons["back_btn"] = back_btn
-    return buttons
 
 
-def draw_achievements(screen, images, fonts, game_state, mx, my, texts):
-    buttons = {"profile_btns": {}, "difficulty_btns": {}}
-    y_offset = 120
-    screen.blit(
-        draw_text(get_text(texts, "profiles"), fonts["small_font"], (0, 0, 0))[0],
-        (50, 150 + y_offset),
-    )
-    y_pos = 200 + y_offset
-    for name in game_state["all_profiles_data"].keys():
-        is_viewing = name == game_state["achievements_viewing_profile"]
-        text_surf, text_rect = draw_text(
-            name, fonts["small_font"], (0, 150, 0) if is_viewing else (0, 0, 0)
-        )
-        text_rect.topleft = (50, y_pos)
-        if not is_viewing and text_rect.collidepoint(mx, my):
-            text_surf, _ = draw_text(name, fonts["small_font"], (255, 200, 0))
-        screen.blit(text_surf, text_rect)
-        buttons["profile_btns"][name] = text_rect
-        y_pos += 40
+class ProfileMenuState(State):
+    def __init__(self):
+        self.buttons = {}
+        self.del_buttons = {}
+        self.conf_buttons = {}
 
-    viewed_profile_data = game_state["all_profiles_data"].get(
-        game_state["achievements_viewing_profile"], {}
-    )
-    screen.blit(
-        draw_text(
-            f"{get_text(texts, 'stats_for')} '{game_state['achievements_viewing_profile']}':",
-            fonts["small_font"],
-            (0, 0, 0),
-        )[0],
-        (350, 150 + y_offset),
-    )
+    def handle_event(self, event, mx, my, game_state):
+        if event.type == pygame.KEYDOWN:
+            if game_state["profile_input_active"]:
+                if event.key == pygame.K_BACKSPACE:
+                    game_state["profile_input_text"] = game_state["profile_input_text"][
+                        :-1
+                    ]
+                elif (
+                    len(game_state["profile_input_text"]) < 15
+                    and event.unicode.isalnum()
+                ):
+                    game_state["profile_input_text"] += event.unicode
+            elif (
+                event.key == pygame.K_ESCAPE
+                and not game_state["initial_profile_selection"]
+            ):
+                game_state["state_manager"].change_state("main_menu", game_state)
 
-    difficulties = {
-        "easy": get_text(texts, "easy"),
-        "medium": get_text(texts, "medium"),
-        "hard": get_text(texts, "hard"),
-    }
-    current_x = 350
-    for key, text in difficulties.items():
-        is_selected = key == game_state["achievements_viewing_difficulty"]
-        diff_surf, diff_rect = draw_text(
-            text, fonts["info_font"], (0, 150, 0) if is_selected else (0, 0, 0)
-        )
-        diff_rect.topleft = (current_x, 200 + y_offset)
-        if not is_selected and diff_rect.collidepoint(mx, my):
-            diff_surf, _ = draw_text(text, fonts["info_font"], (255, 200, 0))
-        screen.blit(diff_surf, diff_rect)
-        buttons["difficulty_btns"][key] = diff_rect
-        current_x += diff_rect.width + 20
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if game_state.get("show_profile_delete_confirm"):
+                if self.conf_buttons.get("yes_btn") and self.conf_buttons[
+                    "yes_btn"
+                ].collidepoint(mx, my):
+                    ptd = game_state["profile_to_delete"]
+                    if ptd in game_state["all_profiles_data"]:
+                        del game_state["all_profiles_data"][ptd]
+                        save_all_profiles_data(game_state["all_profiles_data"])
+                        if game_state["current_profile"] == ptd:
+                            game_state["current_profile"] = "Guest"
+                            reset_game(game_state)
+                    game_state["show_profile_delete_confirm"] = False
+                elif self.conf_buttons.get("no_btn") and self.conf_buttons[
+                    "no_btn"
+                ].collidepoint(mx, my):
+                    game_state["show_profile_delete_confirm"] = False
+                return
 
-    stats_font = fonts["pedia_font"]
-    diff = game_state["achievements_viewing_difficulty"]
-    screen.blit(
-        draw_text(
-            f"{get_text(texts, 'max_combo_classic')} {viewed_profile_data.get(f'max_combo_classic_{diff}', 0)}",
-            stats_font,
-            (0, 0, 0),
-        )[0],
-        (350, 270 + y_offset),
-    )
-    screen.blit(
-        draw_text(
-            f"{get_text(texts, 'max_combo_sharpshooter')} {viewed_profile_data.get(f'max_combo_sharpshooter_{diff}', 0)}",
-            stats_font,
-            (0, 0, 0),
-        )[0],
-        (350, 310 + y_offset),
-    )
-    screen.blit(
-        draw_text(
-            f"{get_text(texts, 'max_combo_obstacle')} {viewed_profile_data.get(f'max_combo_obstacle_{diff}', 0)}",
-            stats_font,
-            (0, 0, 0),
-        )[0],
-        (350, 350 + y_offset),
-    )
+            game_state["profile_input_active"] = False
+            if self.buttons.get("input_box") and self.buttons["input_box"].collidepoint(
+                mx, my
+            ):
+                game_state["profile_input_active"] = True
+            elif self.buttons.get("create_btn") and self.buttons[
+                "create_btn"
+            ].collidepoint(mx, my):
+                new_name = game_state["profile_input_text"].strip()
+                if new_name and new_name not in game_state["all_profiles_data"]:
+                    game_state["all_profiles_data"][
+                        new_name
+                    ] = create_default_achievements()
+                    save_all_profiles_data(game_state["all_profiles_data"])
+                    game_state["current_profile"] = new_name
+                    reset_game(game_state)
+                    game_state["profile_input_text"] = ""
+            elif self.buttons.get("back_btn") and self.buttons["back_btn"].collidepoint(
+                mx, my
+            ):
+                if game_state["initial_profile_selection"]:
+                    game_state["state_manager"].running = False
+                else:
+                    game_state["state_manager"].change_state("main_menu", game_state)
+            else:
+                for name, rect in self.del_buttons.items():
+                    if rect.collidepoint(mx, my):
+                        game_state["show_profile_delete_confirm"] = True
+                        game_state["profile_to_delete"] = name
+                        return
+                for name, rect in self.buttons.get("profiles", {}).items():
+                    if rect.collidepoint(mx, my):
+                        game_state["current_profile"] = name
+                        reset_game(game_state)
+                        if game_state["initial_profile_selection"]:
+                            game_state["initial_profile_selection"] = False
+                            game_state["state_manager"].change_state(
+                                "main_menu", game_state
+                            )
+                        break
 
-    reset_surf, reset_btn = draw_text(
-        get_text(texts, "reset_profile"), fonts["small_font"], (180, 0, 0)
-    )
-    reset_btn.bottomright = (game_state["WIDTH"] - 20, game_state["HEIGHT"] - 20)
-    if reset_btn.collidepoint(mx, my):
-        reset_surf, _ = draw_text(
-            get_text(texts, "reset_profile"), fonts["small_font"], (255, 0, 0)
-        )
-    screen.blit(reset_surf, reset_btn)
-    buttons["reset_btn"] = reset_btn
+    def draw(self, screen, mx, my, game_state):
+        bg = game_state["images"]["menu_background"]
+        screen.blit(bg, bg.get_rect(center=screen.get_rect().center))
+        fonts, texts = game_state["fonts"], game_state["texts"]
 
-    back_surf, back_btn = draw_text(
-        get_text(texts, "back"), fonts["small_font"], (0, 0, 0)
-    )
-    back_btn.bottomleft = (20, game_state["HEIGHT"] - 20)
-    if back_btn.collidepoint(mx, my):
-        back_surf, _ = draw_text(
-            get_text(texts, "back"), fonts["small_font"], (255, 200, 0)
-        )
-    screen.blit(back_surf, back_btn)
-    buttons["back_btn"] = back_btn
-    return buttons
+        self.buttons = {"profiles": {}}
+        self.del_buttons = {}
+        y_pos = 280
+        for name in game_state["all_profiles_data"].keys():
+            color = (0, 150, 0) if name == game_state["current_profile"] else (0, 0, 0)
+            text_surf, text_rect = draw_text(name, fonts["small_font"], color)
+            text_rect.topleft = (150, y_pos)
+            if text_rect.collidepoint(mx, my) and name != game_state["current_profile"]:
+                text_surf, _ = draw_text(name, fonts["small_font"], (255, 200, 0))
+            screen.blit(text_surf, text_rect)
+            self.buttons["profiles"][name] = text_rect
 
+            if name != "Guest":
+                del_surf, del_rect = draw_text("X", fonts["small_font"], (180, 0, 0))
+                del_rect.left, del_rect.centery = (
+                    text_rect.right + 20,
+                    text_rect.centery,
+                )
+                if del_rect.collidepoint(mx, my):
+                    del_surf, _ = draw_text("X", fonts["small_font"], (255, 0, 0))
+                screen.blit(del_surf, del_rect)
+                self.del_buttons[name] = del_rect
+            y_pos += 40
 
-def draw_achievements_reset_confirmation(screen, fonts, game_state, mx, my, texts):
-    overlay = pygame.Surface(
-        (game_state["WIDTH"], game_state["HEIGHT"]), pygame.SRCALPHA
-    )
-    overlay.fill((0, 0, 0, 180))
-    screen.blit(overlay, (0, 0))
-    dialog_rect = pygame.Rect(0, 0, 600, 200)
-    dialog_rect.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2)
-    pygame.draw.rect(screen, (50, 50, 70), dialog_rect)
-    pygame.draw.rect(screen, (200, 200, 220), dialog_rect, 3)
-
-    question_surf, question_rect = draw_text(
-        f"{get_text(texts, 'confirm_reset_stats')} '{game_state['achievements_viewing_profile']}'?",
-        fonts["small_font"],
-        (255, 255, 255),
-    )
-    question_rect.centerx = dialog_rect.centerx
-    question_rect.y = dialog_rect.y + 40
-    screen.blit(question_surf, question_rect)
-
-    yes_surf, yes_btn = draw_text(
-        get_text(texts, "yes"), fonts["small_font"], (200, 80, 80)
-    )
-    yes_btn.center = (dialog_rect.centerx - 80, dialog_rect.centery + 40)
-    if yes_btn.collidepoint(mx, my):
-        yes_surf, _ = draw_text(
-            get_text(texts, "yes"), fonts["small_font"], (255, 120, 120)
-        )
-    screen.blit(yes_surf, yes_btn)
-
-    no_surf, no_btn = draw_text(
-        get_text(texts, "no"), fonts["small_font"], (80, 200, 80)
-    )
-    no_btn.center = (dialog_rect.centerx + 80, dialog_rect.centery + 40)
-    if no_btn.collidepoint(mx, my):
-        no_surf, _ = draw_text(
-            get_text(texts, "no"), fonts["small_font"], (120, 255, 120)
-        )
-    screen.blit(no_surf, no_btn)
-    return {"yes_btn": yes_btn, "no_btn": no_btn}
-
-
-def draw_birdpedia_menu(screen, fonts, game_state, mx, my, texts):
-    buttons = {}
-    pedia_items = get_text(texts, "pedia_items")
-    num_items = len(pedia_items)
-    items_per_column = (num_items + 1) // 2
-    for i, item_text in enumerate(pedia_items):
-        x = 150 if i < items_per_column else 450
-        y = 300 + (i if i < items_per_column else i - items_per_column) * 40
-        text_surf, text_rect = draw_text(item_text, fonts["small_font"], (0, 0, 0))
-        text_rect.topleft = (x, y)
-        if text_rect.collidepoint(mx, my):
-            text_surf, _ = draw_text(item_text, fonts["small_font"], (255, 200, 0))
-        screen.blit(text_surf, text_rect)
-        buttons[item_text] = text_rect
-
-    back_surf, back_btn = draw_text(
-        get_text(texts, "back"), fonts["small_font"], (0, 0, 0)
-    )
-    back_btn.bottomleft = (20, game_state["HEIGHT"] - 20)
-    if back_btn.collidepoint(mx, my):
-        back_surf, _ = draw_text(
-            get_text(texts, "back"), fonts["small_font"], (255, 200, 0)
-        )
-    screen.blit(back_surf, back_btn)
-    buttons["back_btn"] = back_btn
-    return buttons
-
-
-def draw_birdpedia_detail_screen(screen, fonts, game_state, mx, my, texts):
-    buttons = {}
-    item_name = game_state.get("birdpedia_item_selected", "Описание")
-    image_key = PEDIA_IMAGES.get(item_name)
-    if image_key:
-        img_bg_rect = pygame.Rect(100, 280, 150, 150)
-        pygame.draw.rect(screen, (20, 20, 20), img_bg_rect)
-        item_img = (
-            game_state["images"][image_key[0]][image_key[1]]
-            if isinstance(image_key, tuple)
-            else game_state["images"][image_key]
-        )
-        scaled_img = pygame.transform.scale(item_img, (120, 120))
-        screen.blit(scaled_img, scaled_img.get_rect(center=img_bg_rect.center))
-
-    font = fonts["pedia_font"]
-    words = (
-        get_text(texts, "pedia_descriptions")
-        .get(item_name, get_text(texts, "pedia_not_found"))
-        .split(" ")
-    )
-    x, y = 300, 280
-    space = font.size(" ")[0]
-    for word in words:
-        word_surface = font.render(word, True, (0, 0, 0))
-        if x + word_surface.get_width() >= 300 + 450:
-            x = 300
-            y += font.get_linesize()
-        screen.blit(word_surface, (x, y))
-        x += word_surface.get_width() + space
-
-    back_surf, back_btn = draw_text(
-        get_text(texts, "back"), fonts["small_font"], (0, 0, 0)
-    )
-    back_btn.bottomleft = (20, game_state["HEIGHT"] - 20)
-    if back_btn.collidepoint(mx, my):
-        back_surf, _ = draw_text(
-            get_text(texts, "back"), fonts["small_font"], (255, 200, 0)
-        )
-    screen.blit(back_surf, back_btn)
-    buttons["back_btn"] = back_btn
-    return buttons
-
-
-def draw_hint_popup(screen, fonts, game_state, mx, my, texts):
-    buttons = {}
-    overlay = pygame.Surface(
-        (game_state["WIDTH"], game_state["HEIGHT"]), pygame.SRCALPHA
-    )
-    overlay.fill((0, 0, 0, 180))
-    screen.blit(overlay, (0, 0))
-    dialog_rect = pygame.Rect(0, 0, 600, 250)
-    dialog_rect.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2)
-    pygame.draw.rect(screen, (60, 60, 80), dialog_rect)
-    pygame.draw.rect(screen, (210, 210, 230), dialog_rect, 3)
-
-    bird_name_ru = game_state.get("bird_image_to_name", {}).get(
-        game_state.get("current_bird_img"), "Неизвестная птица"
-    )
-    try:
-        bird_name = get_text(texts, "pedia_items")[
-            list(game_state.get("bird_image_to_name", {}).values()).index(bird_name_ru)
-        ]
-    except (ValueError, IndexError):
-        bird_name = get_text(texts, "unknown_bird")
-
-    title_surf, title_rect = draw_text(bird_name, fonts["small_font"], (255, 215, 0))
-    title_rect.centerx = dialog_rect.centerx
-    title_rect.y = dialog_rect.y + 20
-    screen.blit(title_surf, title_rect)
-
-    font = fonts["pedia_font"]
-    words = (
-        get_text(texts, "pedia_descriptions")
-        .get(bird_name, get_text(texts, "no_bird_on_slingshot"))
-        .split(" ")
-    )
-    x, y = dialog_rect.left + 20, dialog_rect.y + 70
-    space = font.size(" ")[0]
-    for word in words:
-        word_surface = font.render(word, True, (255, 255, 255))
-        if x + word_surface.get_width() >= dialog_rect.right - 20:
-            x = dialog_rect.left + 20
-            y += font.get_linesize()
-        screen.blit(word_surface, (x, y))
-        x += word_surface.get_width() + space
-
-    close_surf, close_btn = draw_text(
-        get_text(texts, "hint_popup_close"), fonts["small_font"], (255, 255, 255)
-    )
-    close_btn.center = (dialog_rect.centerx, dialog_rect.bottom - 30)
-    if close_btn.collidepoint(mx, my):
-        close_surf, _ = draw_text(
-            get_text(texts, "hint_popup_close"), fonts["small_font"], (120, 255, 120)
-        )
-    screen.blit(close_surf, close_btn)
-    buttons["close_btn"] = close_btn
-    return buttons
-
-
-def draw_training_popup(screen, fonts, game_state, mx, my, texts):
-    buttons = {}
-    overlay = pygame.Surface(
-        (game_state["WIDTH"], game_state["HEIGHT"]), pygame.SRCALPHA
-    )
-    overlay.fill((0, 0, 0, 180))
-    screen.blit(overlay, (0, 0))
-    dialog_rect = pygame.Rect(0, 0, 700, 250)
-    dialog_rect.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2)
-    pygame.draw.rect(screen, (50, 70, 50), dialog_rect)
-    pygame.draw.rect(screen, (200, 220, 200), dialog_rect, 3)
-
-    words = game_state.get("training_popup_text", "").split(" ")
-    x, y = dialog_rect.left + 20, dialog_rect.top + 20
-    space = fonts["small_font"].size(" ")[0]
-    for word in words:
-        word_surface = fonts["small_font"].render(word, True, (255, 255, 255))
-        if x + word_surface.get_width() >= dialog_rect.right - 20:
-            x = dialog_rect.left + 20
-            y += fonts["small_font"].get_linesize()
-        screen.blit(word_surface, (x, y))
-        x += word_surface.get_width() + space
-
-    continue_surf, continue_btn = draw_text(
-        get_text(texts, "training_popup_continue"), fonts["small_font"], (255, 255, 255)
-    )
-    continue_btn.center = (dialog_rect.centerx, dialog_rect.bottom - 40)
-    if continue_btn.collidepoint(mx, my):
-        continue_surf, _ = draw_text(
-            get_text(texts, "training_popup_continue"),
-            fonts["small_font"],
-            (120, 255, 120),
-        )
-    screen.blit(continue_surf, continue_btn)
-    buttons["continue_btn"] = continue_btn
-    return buttons
-
-
-def draw_training_complete_screen(screen, fonts, game_state, mx, my, texts):
-    buttons = {}
-    overlay = pygame.Surface(
-        (game_state["WIDTH"], game_state["HEIGHT"]), pygame.SRCALPHA
-    )
-    overlay.fill((0, 0, 0, 180))
-    screen.blit(overlay, (0, 0))
-    title_surf, title_rect = draw_text(
-        get_text(texts, "training_complete_title"), fonts["font"], (255, 215, 0)
-    )
-    title_rect.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2 - 50)
-    screen.blit(title_surf, title_rect)
-
-    restart_surf, restart_btn = draw_text(
-        get_text(texts, "training_restart"), fonts["small_font"], (255, 255, 255)
-    )
-    restart_btn.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2 + 20)
-    if restart_btn.collidepoint(mx, my):
-        restart_surf, _ = draw_text(
-            get_text(texts, "training_restart"), fonts["small_font"], (255, 200, 0)
-        )
-    screen.blit(restart_surf, restart_btn)
-    buttons["restart_btn"] = restart_btn
-
-    exit_surf, exit_btn = draw_text(
-        get_text(texts, "training_exit_to_menu"), fonts["small_font"], (255, 255, 255)
-    )
-    exit_btn.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2 + 70)
-    if exit_btn.collidepoint(mx, my):
-        exit_surf, _ = draw_text(
-            get_text(texts, "training_exit_to_menu"), fonts["small_font"], (255, 200, 0)
-        )
-    screen.blit(exit_surf, exit_btn)
-    buttons["exit_btn"] = exit_btn
-    return buttons
-
-
-def draw_gameplay(screen, images, fonts, game_state, texts):
-    GROUND_LEVEL = game_state["GROUND_LEVEL"]
-    scale = game_state["scale_factor"]
-    queue_start_x = int(40 * scale)
-    queue_gap = int(60 * scale)
-    bird_size = game_state["object_size"]
-
-    # Отрисовка очереди птиц
-    for i, bird_img in enumerate(game_state["bird_queue"]):
-        screen.blit(
-            bird_img, (queue_start_x + i * queue_gap, GROUND_LEVEL - bird_size * 0.9)
-        )
-
-    # Отрисовка рогатки
-    pygame.draw.circle(
-        screen,
-        (139, 69, 19),
-        (game_state["sling_x"], game_state["sling_y"]),
-        int(5 * scale),
-    )
-
-    mb = game_state.get("main_bird")
-
-    # Индикатор силы натяжения
-    if mb and mb.state == "dragging" and not game_state.get("paused"):
-        dx = game_state["sling_x"] - mb.x
-        dy = game_state["sling_y"] - mb.y
-        power_bar_width = int(150 * scale)
-        power_bar_height = int(15 * scale)
-        max_drag_dist = int(150 * scale)
-        distance = min(math.hypot(dx, dy), max_drag_dist)
-        power_percent = distance / max_drag_dist
-        bar_x = game_state["sling_x"] - power_bar_width // 2
-        bar_y = game_state["sling_y"] + int(30 * scale)
-        pygame.draw.rect(
-            screen, (100, 100, 100), (bar_x, bar_y, power_bar_width, power_bar_height)
-        )
+        ib_rect = pygame.Rect(150, y_pos + 30, 250, 40)
+        pygame.draw.rect(screen, (255, 255, 255), ib_rect)
         pygame.draw.rect(
             screen,
-            (int(255 * power_percent), int(255 * (1 - power_percent)), 0),
-            (bar_x, bar_y, int(power_bar_width * power_percent), power_bar_height),
+            (255, 200, 0) if game_state["profile_input_active"] else (200, 200, 200),
+            ib_rect,
+            2,
         )
-        power_text_surf, _ = draw_text(
-            f"{get_text(texts, 'power_colon')} {int(power_percent * 100)}%",
+        txt = game_state["profile_input_text"] + (
+            "|" if game_state["profile_input_active"] and time.time() % 1 > 0.5 else ""
+        )
+        screen.blit(
+            draw_text(txt, fonts["small_font"], (0, 0, 0))[0],
+            (ib_rect.x + 10, ib_rect.y + 5),
+        )
+        self.buttons["input_box"] = ib_rect
+
+        c_surf, c_btn = draw_text(
+            get_text(texts, "create"), fonts["small_font"], (0, 0, 0)
+        )
+        c_btn.topleft = (ib_rect.right + 20, ib_rect.y)
+        if c_btn.collidepoint(mx, my):
+            c_surf, _ = draw_text(
+                get_text(texts, "create"), fonts["small_font"], (0, 180, 0)
+            )
+        screen.blit(c_surf, c_btn)
+        self.buttons["create_btn"] = c_btn
+
+        b_txt = (
+            get_text(texts, "exit")
+            if game_state.get("initial_profile_selection")
+            else get_text(texts, "back")
+        )
+        b_surf, b_btn = draw_text(b_txt, fonts["small_font"], (0, 0, 0))
+        b_btn.bottomleft = (20, game_state["HEIGHT"] - 20)
+        if b_btn.collidepoint(mx, my):
+            b_surf, _ = draw_text(b_txt, fonts["small_font"], (255, 200, 0))
+        screen.blit(b_surf, b_btn)
+        self.buttons["back_btn"] = b_btn
+
+        if game_state.get("show_profile_delete_confirm"):
+            overlay = pygame.Surface(
+                (game_state["WIDTH"], game_state["HEIGHT"]), pygame.SRCALPHA
+            )
+            overlay.fill((0, 0, 0, 180))
+            screen.blit(overlay, (0, 0))
+            dr = pygame.Rect(0, 0, 600, 200)
+            dr.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2)
+            pygame.draw.rect(screen, (70, 50, 50), dr)
+            pygame.draw.rect(screen, (220, 200, 200), dr, 3)
+            q_surf, q_rect = draw_text(
+                f"{get_text(texts, 'confirm_delete_profile')} '{game_state['profile_to_delete']}'?",
+                fonts["small_font"],
+                (255, 255, 255),
+            )
+            q_rect.centerx, q_rect.y = dr.centerx, dr.y + 40
+            screen.blit(q_surf, q_rect)
+
+            y_surf, y_btn = draw_text(
+                get_text(texts, "yes"), fonts["small_font"], (200, 80, 80)
+            )
+            y_btn.center = (dr.centerx - 80, dr.centery + 40)
+            if y_btn.collidepoint(mx, my):
+                y_surf, _ = draw_text(
+                    get_text(texts, "yes"), fonts["small_font"], (255, 120, 120)
+                )
+            screen.blit(y_surf, y_btn)
+
+            n_surf, n_btn = draw_text(
+                get_text(texts, "no"), fonts["small_font"], (80, 200, 80)
+            )
+            n_btn.center = (dr.centerx + 80, dr.centery + 40)
+            if n_btn.collidepoint(mx, my):
+                n_surf, _ = draw_text(
+                    get_text(texts, "no"), fonts["small_font"], (120, 255, 120)
+                )
+            screen.blit(n_surf, n_btn)
+            self.conf_buttons = {"yes_btn": y_btn, "no_btn": n_btn}
+
+
+class SettingsState(State):
+    def __init__(self):
+        self.buttons = {}
+
+    def handle_event(self, event, mx, my, game_state):
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            game_state["state_manager"].change_state("main_menu", game_state)
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            sm = game_state["state_manager"]
+            if self.buttons.get("sound_btn") and self.buttons["sound_btn"].collidepoint(
+                mx, my
+            ):
+                sm.change_state("sound_settings", game_state)
+            elif self.buttons.get("screen_btn") and self.buttons[
+                "screen_btn"
+            ].collidepoint(mx, my):
+                sm.change_state("screen_settings", game_state)
+            elif self.buttons.get("language_btn") and self.buttons[
+                "language_btn"
+            ].collidepoint(mx, my):
+                sm.change_state("language_settings", game_state)
+            elif self.buttons.get("back_btn") and self.buttons["back_btn"].collidepoint(
+                mx, my
+            ):
+                sm.change_state("main_menu", game_state)
+
+    def draw(self, screen, mx, my, game_state):
+        bg = game_state["images"]["menu_background"]
+        screen.blit(bg, bg.get_rect(center=screen.get_rect().center))
+        self.buttons = {}
+        y_step = 70
+        start_y = game_state["HEIGHT"] // 2 + 50
+        infos = [
+            ("sound_btn", "sound", 0),
+            ("screen_btn", "screen", y_step),
+            ("language_btn", "language", y_step * 2),
+        ]
+        for key, t_key, offset in infos:
+            text = get_text(game_state["texts"], t_key)
+            t_surf, t_btn = draw_text(
+                text, game_state["fonts"]["small_font"], (0, 0, 0)
+            )
+            t_btn.center = (game_state["WIDTH"] // 2, start_y + offset)
+            if t_btn.collidepoint(mx, my):
+                t_surf, _ = draw_text(
+                    text, game_state["fonts"]["small_font"], (255, 200, 0)
+                )
+            screen.blit(t_surf, t_btn)
+            self.buttons[key] = t_btn
+
+        b_surf, b_btn = draw_text(
+            get_text(game_state["texts"], "back"),
+            game_state["fonts"]["small_font"],
+            (0, 0, 0),
+        )
+        b_btn.bottomleft = (20, game_state["HEIGHT"] - 20)
+        if b_btn.collidepoint(mx, my):
+            b_surf, _ = draw_text(
+                get_text(game_state["texts"], "back"),
+                game_state["fonts"]["small_font"],
+                (255, 200, 0),
+            )
+        screen.blit(b_surf, b_btn)
+        self.buttons["back_btn"] = b_btn
+
+
+class SoundSettingsState(State):
+    def __init__(self):
+        self.buttons = {}
+
+    def handle_event(self, event, mx, my, game_state):
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            game_state["state_manager"].change_state("settings_menu", game_state)
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.buttons.get("music_slider") and self.buttons[
+                "music_slider"
+            ].collidepoint(mx, my):
+                game_state["is_dragging_music_volume"] = True
+            elif self.buttons.get("sfx_slider") and self.buttons[
+                "sfx_slider"
+            ].collidepoint(mx, my):
+                game_state["is_dragging_sfx_volume"] = True
+            elif self.buttons.get("prev_track_btn") and self.buttons[
+                "prev_track_btn"
+            ].collidepoint(mx, my):
+                n_idx = (
+                    game_state["current_music_track_index"]
+                    - 1
+                    + len(game_state["sounds"]["music_playlist"])
+                ) % len(game_state["sounds"]["music_playlist"])
+                play_music_track(game_state, n_idx)
+            elif self.buttons.get("next_track_btn") and self.buttons[
+                "next_track_btn"
+            ].collidepoint(mx, my):
+                play_music_track(
+                    game_state,
+                    (game_state["current_music_track_index"] + 1)
+                    % len(game_state["sounds"]["music_playlist"]),
+                )
+            elif self.buttons.get("back_btn") and self.buttons["back_btn"].collidepoint(
+                mx, my
+            ):
+                game_state["state_manager"].change_state("settings_menu", game_state)
+        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            game_state["is_dragging_music_volume"] = False
+            game_state["is_dragging_sfx_volume"] = False
+
+        if game_state.get("is_dragging_music_volume"):
+            game_state["music_volume"] = max(
+                0.0,
+                min(
+                    1.0,
+                    (mx - self.buttons["music_slider"].x)
+                    / self.buttons["music_slider"].width,
+                ),
+            )
+            update_all_volumes(game_state)
+        if game_state.get("is_dragging_sfx_volume"):
+            game_state["sfx_volume"] = max(
+                0.0,
+                min(
+                    1.0,
+                    (mx - self.buttons["sfx_slider"].x)
+                    / self.buttons["sfx_slider"].width,
+                ),
+            )
+            update_all_volumes(game_state)
+
+    def draw(self, screen, mx, my, game_state):
+        bg = game_state["images"]["menu_background"]
+        screen.blit(bg, bg.get_rect(center=screen.get_rect().center))
+        fonts, texts = game_state["fonts"], game_state["texts"]
+        self.buttons = {}
+        sy = 280
+        screen.blit(
+            draw_text(get_text(texts, "music_volume"), fonts["small_font"], (0, 0, 0))[
+                0
+            ],
+            (game_state["WIDTH"] // 2 - 150, sy),
+        )
+        ms = pygame.Rect(game_state["WIDTH"] // 2 - 150, sy + 40, 300, 10)
+        pygame.draw.rect(screen, (150, 150, 150), ms)
+        pygame.draw.rect(
+            screen,
+            (0, 150, 0),
+            (ms.x, ms.y, int(game_state["music_volume"] * ms.width), ms.height),
+        )
+        pygame.draw.circle(
+            screen,
+            (0, 100, 0),
+            (ms.x + int(game_state["music_volume"] * ms.width), ms.centery),
+            10,
+        )
+        self.buttons["music_slider"] = ms
+
+        screen.blit(
+            draw_text(get_text(texts, "sfx_volume"), fonts["small_font"], (0, 0, 0))[0],
+            (game_state["WIDTH"] // 2 - 150, sy + 80),
+        )
+        ss = pygame.Rect(game_state["WIDTH"] // 2 - 150, sy + 120, 300, 10)
+        pygame.draw.rect(screen, (150, 150, 150), ss)
+        pygame.draw.rect(
+            screen,
+            (0, 150, 0),
+            (ss.x, ss.y, int(game_state["sfx_volume"] * ss.width), ss.height),
+        )
+        pygame.draw.circle(
+            screen,
+            (0, 100, 0),
+            (ss.x + int(game_state["sfx_volume"] * ss.width), ss.centery),
+            10,
+        )
+        self.buttons["sfx_slider"] = ss
+
+        ty = sy + 160
+        t_surf, t_rect = draw_text(
+            f"{get_text(texts, 'track_colon')} {game_state['current_music_track_index'] + 1}",
             fonts["small_font"],
             (0, 0, 0),
         )
+        t_rect.center = (game_state["WIDTH"] // 2, ty)
+        screen.blit(t_surf, t_rect)
+
+        p_surf, p_btn = draw_text(
+            get_text(texts, "prev_track"), fonts["small_font"], (0, 0, 0)
+        )
+        p_btn.topright = (t_rect.left - 20, t_rect.top)
+        if p_btn.collidepoint(mx, my):
+            p_surf, _ = draw_text(
+                get_text(texts, "prev_track"), fonts["small_font"], (255, 200, 0)
+            )
+        screen.blit(p_surf, p_btn)
+        self.buttons["prev_track_btn"] = p_btn
+
+        n_surf, n_btn = draw_text(
+            get_text(texts, "next_track"), fonts["small_font"], (0, 0, 0)
+        )
+        n_btn.topleft = (t_rect.right + 20, t_rect.top)
+        if n_btn.collidepoint(mx, my):
+            n_surf, _ = draw_text(
+                get_text(texts, "next_track"), fonts["small_font"], (255, 200, 0)
+            )
+        screen.blit(n_surf, n_btn)
+        self.buttons["next_track_btn"] = n_btn
+
+        b_surf, b_btn = draw_text(
+            get_text(texts, "back"), fonts["small_font"], (0, 0, 0)
+        )
+        b_btn.bottomleft = (20, game_state["HEIGHT"] - 20)
+        if b_btn.collidepoint(mx, my):
+            b_surf, _ = draw_text(
+                get_text(texts, "back"), fonts["small_font"], (255, 200, 0)
+            )
+        screen.blit(b_surf, b_btn)
+        self.buttons["back_btn"] = b_btn
+
+
+class ScreenSettingsState(State):
+    def __init__(self):
+        self.buttons = {}
+
+    def handle_event(self, event, mx, my, game_state):
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            apply_screen_settings(game_state)
+            game_state["state_manager"].change_state("settings_menu", game_state)
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.buttons.get("brightness_slider") and self.buttons[
+                "brightness_slider"
+            ].collidepoint(mx, my):
+                game_state["is_dragging_brightness"] = True
+            elif self.buttons.get("res_800_btn") and self.buttons[
+                "res_800_btn"
+            ].collidepoint(mx, my):
+                game_state["pending_screen_mode"] = (800, 600)
+            elif self.buttons.get("res_fs_btn") and self.buttons[
+                "res_fs_btn"
+            ].collidepoint(mx, my):
+                game_state["pending_screen_mode"] = "fullscreen"
+            elif self.buttons.get("back_btn") and self.buttons["back_btn"].collidepoint(
+                mx, my
+            ):
+                apply_screen_settings(game_state)
+                game_state["state_manager"].change_state("settings_menu", game_state)
+        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            game_state["is_dragging_brightness"] = False
+
+        if game_state.get("is_dragging_brightness"):
+            game_state["brightness_slider_pos"] = max(
+                0.0,
+                min(
+                    1.0,
+                    (mx - self.buttons["brightness_slider"].x)
+                    / self.buttons["brightness_slider"].width,
+                ),
+            )
+
+    def draw(self, screen, mx, my, game_state):
+        bg = game_state["images"]["menu_background"]
+        screen.blit(bg, bg.get_rect(center=screen.get_rect().center))
+        fonts, texts = game_state["fonts"], game_state["texts"]
+        self.buttons = {}
+        sx = game_state["WIDTH"] // 2 - 150
+
         screen.blit(
-            power_text_surf,
+            draw_text(get_text(texts, "brightness"), fonts["small_font"], (0, 0, 0))[0],
+            (sx, 300),
+        )
+        bs = pygame.Rect(sx, 340, 300, 10)
+        kx = bs.x + int(game_state["brightness_slider_pos"] * bs.width)
+        pygame.draw.rect(screen, (150, 150, 150), bs)
+        pygame.draw.rect(screen, (250, 250, 100), (bs.x, bs.y, kx - bs.x, bs.height))
+        pygame.draw.circle(screen, (200, 200, 50), (kx, bs.centery), 10)
+        self.buttons["brightness_slider"] = bs
+
+        screen.blit(
+            draw_text(get_text(texts, "resolution"), fonts["small_font"], (0, 0, 0))[0],
+            (sx, 420),
+        )
+        is_800 = game_state["pending_screen_mode"] == (800, 600)
+        r8_surf, r8_btn = draw_text(
+            "800 x 600", fonts["small_font"], (0, 150, 0) if is_800 else (0, 0, 0)
+        )
+        r8_btn.topleft = (sx, 460)
+        if not is_800 and r8_btn.collidepoint(mx, my):
+            r8_surf, _ = draw_text("800 x 600", fonts["small_font"], (255, 200, 0))
+        screen.blit(r8_surf, r8_btn)
+        self.buttons["res_800_btn"] = r8_btn
+
+        is_fs = game_state["pending_screen_mode"] == "fullscreen"
+        fs_surf, fs_btn = draw_text(
+            get_text(texts, "fullscreen"),
+            fonts["small_font"],
+            (0, 150, 0) if is_fs else (0, 0, 0),
+        )
+        fs_btn.topleft = (r8_btn.right + 40, r8_btn.top)
+        if not is_fs and fs_btn.collidepoint(mx, my):
+            fs_surf, _ = draw_text(
+                get_text(texts, "fullscreen"), fonts["small_font"], (255, 200, 0)
+            )
+        screen.blit(fs_surf, fs_btn)
+        self.buttons["res_fs_btn"] = fs_btn
+
+        b_surf, b_btn = draw_text(
+            get_text(texts, "back"), fonts["small_font"], (0, 0, 0)
+        )
+        b_btn.bottomleft = (20, game_state["HEIGHT"] - 20)
+        if b_btn.collidepoint(mx, my):
+            b_surf, _ = draw_text(
+                get_text(texts, "back"), fonts["small_font"], (255, 200, 0)
+            )
+        screen.blit(b_surf, b_btn)
+        self.buttons["back_btn"] = b_btn
+
+
+class LanguageMenuState(State):
+    def __init__(self):
+        self.buttons = {}
+
+    def handle_event(self, event, mx, my, game_state):
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            game_state["state_manager"].change_state("settings_menu", game_state)
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.buttons.get("ru_btn") and self.buttons["ru_btn"].collidepoint(
+                mx, my
+            ):
+                game_state["language"], game_state["texts"] = "ru", LANGUAGES["ru"]
+            elif self.buttons.get("en_btn") and self.buttons["en_btn"].collidepoint(
+                mx, my
+            ):
+                game_state["language"], game_state["texts"] = "en", LANGUAGES["en"]
+            elif self.buttons.get("back_btn") and self.buttons["back_btn"].collidepoint(
+                mx, my
+            ):
+                game_state["state_manager"].change_state("settings_menu", game_state)
+
+    def draw(self, screen, mx, my, game_state):
+        bg = game_state["images"]["menu_background"]
+        screen.blit(bg, bg.get_rect(center=screen.get_rect().center))
+        fonts, texts = game_state["fonts"], game_state["texts"]
+        self.buttons = {}
+
+        ru_surf, ru_btn = draw_text(
+            "Русский",
+            fonts["small_font"],
+            (0, 150, 0) if game_state["language"] == "ru" else (0, 0, 0),
+        )
+        ru_btn.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2)
+        if ru_btn.collidepoint(mx, my) and game_state["language"] != "ru":
+            ru_surf, _ = draw_text("Русский", fonts["small_font"], (255, 200, 0))
+        screen.blit(ru_surf, ru_btn)
+        self.buttons["ru_btn"] = ru_btn
+
+        en_surf, en_btn = draw_text(
+            "English",
+            fonts["small_font"],
+            (0, 150, 0) if game_state["language"] == "en" else (0, 0, 0),
+        )
+        en_btn.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2 + 60)
+        if en_btn.collidepoint(mx, my) and game_state["language"] != "en":
+            en_surf, _ = draw_text("English", fonts["small_font"], (255, 200, 0))
+        screen.blit(en_surf, en_btn)
+        self.buttons["en_btn"] = en_btn
+
+        b_surf, b_btn = draw_text(
+            get_text(texts, "back"), fonts["small_font"], (0, 0, 0)
+        )
+        b_btn.bottomleft = (20, game_state["HEIGHT"] - 20)
+        if b_btn.collidepoint(mx, my):
+            b_surf, _ = draw_text(
+                get_text(texts, "back"), fonts["small_font"], (255, 200, 0)
+            )
+        screen.blit(b_surf, b_btn)
+        self.buttons["back_btn"] = b_btn
+
+
+class GameModeMenuState(State):
+    def __init__(self):
+        self.buttons = {}
+
+    def handle_event(self, event, mx, my, game_state):
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            game_state["state_manager"].change_state("main_menu", game_state)
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.buttons.get("diff_slider") and self.buttons[
+                "diff_slider"
+            ].collidepoint(mx, my):
+                game_state["is_dragging_difficulty"] = True
+            elif self.buttons.get("back_btn") and self.buttons["back_btn"].collidepoint(
+                mx, my
+            ):
+                game_state["state_manager"].change_state("main_menu", game_state)
+            else:
+                for mode, btn in self.buttons.items():
+                    if mode not in ["diff_slider", "back_btn"] and btn.collidepoint(
+                        mx, my
+                    ):
+                        game_state["game_mode"] = mode.replace("_btn", "")
+        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            game_state["is_dragging_difficulty"] = False
+
+        if game_state.get("is_dragging_difficulty"):
+            slider = self.buttons["diff_slider"]
+            rel = mx - slider.x
+            if rel < slider.width / 3:
+                game_state["difficulty"] = "easy"
+            elif rel < 2 * slider.width / 3:
+                game_state["difficulty"] = "medium"
+            else:
+                game_state["difficulty"] = "hard"
+
+    def draw(self, screen, mx, my, game_state):
+        bg = game_state["images"]["menu_background"]
+        screen.blit(bg, bg.get_rect(center=screen.get_rect().center))
+        fonts, texts = game_state["fonts"], game_state["texts"]
+        self.buttons = {}
+        sy = 220
+        modes = [
+            "classic",
+            "sharpshooter",
+            "obstacle",
+            "campaign",
+            "training",
+            "developer",
+        ]
+        for i, m in enumerate(modes):
+            t_key = (
+                m
+                if m not in ["obstacle", "developer"]
+                else ("obstacle_mode" if m == "obstacle" else "dev_mode")
+            )
+            color = (0, 150, 0) if game_state["game_mode"] == m else (0, 0, 0)
+            t_surf, t_btn = draw_text(
+                get_text(texts, t_key), fonts["small_font"], color
+            )
+            t_btn.topleft = (50, sy + 50 * i)
+            if t_btn.collidepoint(mx, my) and game_state["game_mode"] != m:
+                t_surf, _ = draw_text(
+                    get_text(texts, t_key), fonts["small_font"], (255, 200, 0)
+                )
+            screen.blit(t_surf, t_btn)
+            self.buttons[f"{m}_btn"] = t_btn
+
+        if game_state["game_mode"] in ["classic", "sharpshooter", "obstacle"]:
+            sl = pygame.Rect(400, 350, 300, 10)
+            pygame.draw.rect(screen, (200, 200, 200), sl)
+            kp = (
+                sl.x + 10
+                if game_state["difficulty"] == "easy"
+                else (
+                    sl.centerx
+                    if game_state["difficulty"] == "medium"
+                    else sl.right - 10
+                )
+            )
+            pygame.draw.circle(screen, (255, 0, 0), (kp, sl.centery), 10)
+            screen.blit(
+                draw_text(get_text(texts, "easy"), fonts["small_font"], (0, 0, 0))[0],
+                (sl.x, sl.y + 15),
+            )
+            m_surf = draw_text(
+                get_text(texts, "medium"), fonts["small_font"], (0, 0, 0)
+            )[0]
+            screen.blit(m_surf, (sl.centerx - m_surf.get_width() // 2, sl.y + 15))
+            h_surf = draw_text(get_text(texts, "hard"), fonts["small_font"], (0, 0, 0))[
+                0
+            ]
+            screen.blit(h_surf, (sl.right - h_surf.get_width(), sl.y + 15))
+            self.buttons["diff_slider"] = sl
+
+        b_surf, b_btn = draw_text(
+            get_text(texts, "back"), fonts["small_font"], (0, 0, 0)
+        )
+        b_btn.bottomleft = (20, game_state["HEIGHT"] - 20)
+        if b_btn.collidepoint(mx, my):
+            b_surf, _ = draw_text(
+                get_text(texts, "back"), fonts["small_font"], (255, 200, 0)
+            )
+        screen.blit(b_surf, b_btn)
+        self.buttons["back_btn"] = b_btn
+
+
+class AchievementsMenuState(State):
+    def __init__(self):
+        self.buttons = {}
+        self.conf_buttons = {}
+
+    def handle_event(self, event, mx, my, game_state):
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            game_state["state_manager"].change_state("main_menu", game_state)
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if game_state.get("show_achievements_reset_confirm"):
+                if self.conf_buttons.get("yes_btn") and self.conf_buttons[
+                    "yes_btn"
+                ].collidepoint(mx, my):
+                    ptr = game_state["achievements_viewing_profile"]
+                    game_state["all_profiles_data"][ptr] = create_default_achievements()
+                    if ptr == game_state["current_profile"]:
+                        game_state.update(game_state["all_profiles_data"][ptr])
+                    game_state["show_achievements_reset_confirm"] = False
+                elif self.conf_buttons.get("no_btn") and self.conf_buttons[
+                    "no_btn"
+                ].collidepoint(mx, my):
+                    game_state["show_achievements_reset_confirm"] = False
+                return
+
+            if self.buttons.get("back_btn") and self.buttons["back_btn"].collidepoint(
+                mx, my
+            ):
+                game_state["state_manager"].change_state("main_menu", game_state)
+            elif self.buttons.get("reset_btn") and self.buttons[
+                "reset_btn"
+            ].collidepoint(mx, my):
+                game_state["show_achievements_reset_confirm"] = True
+            else:
+                for name, btn in self.buttons.get("profiles", {}).items():
+                    if btn.collidepoint(mx, my):
+                        game_state["achievements_viewing_profile"] = name
+                        return
+                for diff, btn in self.buttons.get("diffs", {}).items():
+                    if btn.collidepoint(mx, my):
+                        game_state["achievements_viewing_difficulty"] = diff
+                        return
+
+    def draw(self, screen, mx, my, game_state):
+        bg = game_state["images"]["menu_background"]
+        screen.blit(bg, bg.get_rect(center=screen.get_rect().center))
+        fonts, texts = game_state["fonts"], game_state["texts"]
+        self.buttons = {"profiles": {}, "diffs": {}}
+        yo = 120
+        screen.blit(
+            draw_text(get_text(texts, "profiles"), fonts["small_font"], (0, 0, 0))[0],
+            (50, 150 + yo),
+        )
+        yp = 200 + yo
+        for name in game_state["all_profiles_data"].keys():
+            iv = name == game_state.get("achievements_viewing_profile")
+            t_surf, t_btn = draw_text(
+                name, fonts["small_font"], (0, 150, 0) if iv else (0, 0, 0)
+            )
+            t_btn.topleft = (50, yp)
+            if not iv and t_btn.collidepoint(mx, my):
+                t_surf, _ = draw_text(name, fonts["small_font"], (255, 200, 0))
+            screen.blit(t_surf, t_btn)
+            self.buttons["profiles"][name] = t_btn
+            yp += 40
+
+        vp_data = game_state["all_profiles_data"].get(
+            game_state.get("achievements_viewing_profile", ""), {}
+        )
+        screen.blit(
+            draw_text(
+                f"{get_text(texts, 'stats_for')} '{game_state.get('achievements_viewing_profile')}':",
+                fonts["small_font"],
+                (0, 0, 0),
+            )[0],
+            (350, 150 + yo),
+        )
+
+        diffs = {
+            "easy": get_text(texts, "easy"),
+            "medium": get_text(texts, "medium"),
+            "hard": get_text(texts, "hard"),
+        }
+        cx = 350
+        for k, txt in diffs.items():
+            iss = k == game_state.get("achievements_viewing_difficulty", "easy")
+            d_surf, d_btn = draw_text(
+                txt, fonts["info_font"], (0, 150, 0) if iss else (0, 0, 0)
+            )
+            d_btn.topleft = (cx, 200 + yo)
+            if not iss and d_btn.collidepoint(mx, my):
+                d_surf, _ = draw_text(txt, fonts["info_font"], (255, 200, 0))
+            screen.blit(d_surf, d_btn)
+            self.buttons["diffs"][k] = d_btn
+            cx += d_btn.width + 20
+
+        df = game_state.get("achievements_viewing_difficulty", "easy")
+        sf = fonts["pedia_font"]
+        screen.blit(
+            draw_text(
+                f"{get_text(texts, 'max_combo_classic')} {vp_data.get(f'max_combo_classic_{df}', 0)}",
+                sf,
+                (0, 0, 0),
+            )[0],
+            (350, 270 + yo),
+        )
+        screen.blit(
+            draw_text(
+                f"{get_text(texts, 'max_combo_sharpshooter')} {vp_data.get(f'max_combo_sharpshooter_{df}', 0)}",
+                sf,
+                (0, 0, 0),
+            )[0],
+            (350, 310 + yo),
+        )
+        screen.blit(
+            draw_text(
+                f"{get_text(texts, 'max_combo_obstacle')} {vp_data.get(f'max_combo_obstacle_{df}', 0)}",
+                sf,
+                (0, 0, 0),
+            )[0],
+            (350, 350 + yo),
+        )
+
+        r_surf, r_btn = draw_text(
+            get_text(texts, "reset_profile"), fonts["small_font"], (180, 0, 0)
+        )
+        r_btn.bottomright = (game_state["WIDTH"] - 20, game_state["HEIGHT"] - 20)
+        if r_btn.collidepoint(mx, my):
+            r_surf, _ = draw_text(
+                get_text(texts, "reset_profile"), fonts["small_font"], (255, 0, 0)
+            )
+        screen.blit(r_surf, r_btn)
+        self.buttons["reset_btn"] = r_btn
+
+        b_surf, b_btn = draw_text(
+            get_text(texts, "back"), fonts["small_font"], (0, 0, 0)
+        )
+        b_btn.bottomleft = (20, game_state["HEIGHT"] - 20)
+        if b_btn.collidepoint(mx, my):
+            b_surf, _ = draw_text(
+                get_text(texts, "back"), fonts["small_font"], (255, 200, 0)
+            )
+        screen.blit(b_surf, b_btn)
+        self.buttons["back_btn"] = b_btn
+
+        if game_state.get("show_achievements_reset_confirm"):
+            overlay = pygame.Surface(
+                (game_state["WIDTH"], game_state["HEIGHT"]), pygame.SRCALPHA
+            )
+            overlay.fill((0, 0, 0, 180))
+            screen.blit(overlay, (0, 0))
+            dr = pygame.Rect(0, 0, 600, 200)
+            dr.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2)
+            pygame.draw.rect(screen, (50, 50, 70), dr)
+            pygame.draw.rect(screen, (200, 200, 220), dr, 3)
+            q_surf, q_rect = draw_text(
+                f"{get_text(texts, 'confirm_reset_stats')} '{game_state.get('achievements_viewing_profile')}'?",
+                fonts["small_font"],
+                (255, 255, 255),
+            )
+            q_rect.centerx, q_rect.y = dr.centerx, dr.y + 40
+            screen.blit(q_surf, q_rect)
+
+            y_surf, y_btn = draw_text(
+                get_text(texts, "yes"), fonts["small_font"], (200, 80, 80)
+            )
+            y_btn.center = (dr.centerx - 80, dr.centery + 40)
+            if y_btn.collidepoint(mx, my):
+                y_surf, _ = draw_text(
+                    get_text(texts, "yes"), fonts["small_font"], (255, 120, 120)
+                )
+            screen.blit(y_surf, y_btn)
+
+            n_surf, n_btn = draw_text(
+                get_text(texts, "no"), fonts["small_font"], (80, 200, 80)
+            )
+            n_btn.center = (dr.centerx + 80, dr.centery + 40)
+            if n_btn.collidepoint(mx, my):
+                n_surf, _ = draw_text(
+                    get_text(texts, "no"), fonts["small_font"], (120, 255, 120)
+                )
+            screen.blit(n_surf, n_btn)
+            self.conf_buttons = {"yes_btn": y_btn, "no_btn": n_btn}
+
+
+class BirdpediaMenuState(State):
+    def __init__(self):
+        self.buttons = {}
+
+    def handle_event(self, event, mx, my, game_state):
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            game_state["state_manager"].change_state("main_menu", game_state)
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.buttons.get("back_btn") and self.buttons["back_btn"].collidepoint(
+                mx, my
+            ):
+                game_state["state_manager"].change_state("main_menu", game_state)
+            else:
+                for item, btn in self.buttons.items():
+                    if item != "back_btn" and btn.collidepoint(mx, my):
+                        game_state["birdpedia_item_selected"] = item
+                        game_state["state_manager"].change_state(
+                            "birdpedia_detail", game_state
+                        )
+
+    def draw(self, screen, mx, my, game_state):
+        bg = game_state["images"]["menu_background"]
+        screen.blit(bg, bg.get_rect(center=screen.get_rect().center))
+        fonts, texts = game_state["fonts"], game_state["texts"]
+        self.buttons = {}
+        items = get_text(texts, "pedia_items")
+        ipc = (len(items) + 1) // 2
+        for i, item in enumerate(items):
+            x = 150 if i < ipc else 450
+            y = 300 + (i if i < ipc else i - ipc) * 40
+            t_surf, t_btn = draw_text(item, fonts["small_font"], (0, 0, 0))
+            t_btn.topleft = (x, y)
+            if t_btn.collidepoint(mx, my):
+                t_surf, _ = draw_text(item, fonts["small_font"], (255, 200, 0))
+            screen.blit(t_surf, t_btn)
+            self.buttons[item] = t_btn
+
+        b_surf, b_btn = draw_text(
+            get_text(texts, "back"), fonts["small_font"], (0, 0, 0)
+        )
+        b_btn.bottomleft = (20, game_state["HEIGHT"] - 20)
+        if b_btn.collidepoint(mx, my):
+            b_surf, _ = draw_text(
+                get_text(texts, "back"), fonts["small_font"], (255, 200, 0)
+            )
+        screen.blit(b_surf, b_btn)
+        self.buttons["back_btn"] = b_btn
+
+
+class BirdpediaDetailState(State):
+    def __init__(self):
+        self.buttons = {}
+
+    def handle_event(self, event, mx, my, game_state):
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            game_state["state_manager"].change_state("birdpedia_menu", game_state)
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.buttons.get("back_btn") and self.buttons["back_btn"].collidepoint(
+                mx, my
+            ):
+                game_state["state_manager"].change_state("birdpedia_menu", game_state)
+
+    def draw(self, screen, mx, my, game_state):
+        bg = game_state["images"]["menu_background"]
+        screen.blit(bg, bg.get_rect(center=screen.get_rect().center))
+        fonts, texts = game_state["fonts"], game_state["texts"]
+        self.buttons = {}
+
+        item = game_state.get("birdpedia_item_selected", "Описание")
+        img_key = PEDIA_IMAGES.get(item)
+        if img_key:
+            bg_rect = pygame.Rect(100, 280, 150, 150)
+            pygame.draw.rect(screen, (20, 20, 20), bg_rect)
+            img = (
+                game_state["images"][img_key[0]][img_key[1]]
+                if isinstance(img_key, tuple)
+                else game_state["images"][img_key]
+            )
+            s_img = pygame.transform.scale(img, (120, 120))
+            screen.blit(s_img, s_img.get_rect(center=bg_rect.center))
+
+        words = (
+            get_text(texts, "pedia_descriptions")
+            .get(item, get_text(texts, "pedia_not_found"))
+            .split(" ")
+        )
+        x, y = 300, 280
+        sp = fonts["pedia_font"].size(" ")[0]
+        for w in words:
+            ws = fonts["pedia_font"].render(w, True, (0, 0, 0))
+            if x + ws.get_width() >= 750:
+                x = 300
+                y += fonts["pedia_font"].get_linesize()
+            screen.blit(ws, (x, y))
+            x += ws.get_width() + sp
+
+        b_surf, b_btn = draw_text(
+            get_text(texts, "back"), fonts["small_font"], (0, 0, 0)
+        )
+        b_btn.bottomleft = (20, game_state["HEIGHT"] - 20)
+        if b_btn.collidepoint(mx, my):
+            b_surf, _ = draw_text(
+                get_text(texts, "back"), fonts["small_font"], (255, 200, 0)
+            )
+        screen.blit(b_surf, b_btn)
+        self.buttons["back_btn"] = b_btn
+
+
+class LevelSelectionState(State):
+    def __init__(self):
+        self.buttons = {}
+
+    def handle_event(self, event, mx, my, game_state):
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            game_state["state_manager"].change_state("main_menu", game_state)
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.buttons.get("back_btn") and self.buttons["back_btn"].collidepoint(
+                mx, my
+            ):
+                game_state["state_manager"].change_state("main_menu", game_state)
+            else:
+                for lvl, btn in self.buttons.get("levels", {}).items():
+                    if btn.collidepoint(mx, my):
+                        reset_game(game_state)
+                        game_state["state_manager"].change_state("gameplay", game_state)
+                        break
+
+    def draw(self, screen, mx, my, game_state):
+        bg = game_state["images"]["menu_background"]
+        screen.blit(bg, bg.get_rect(center=screen.get_rect().center))
+        fonts, texts = game_state["fonts"], game_state["texts"]
+        self.buttons = {"levels": {}}
+
+        t_surf, t_rect = draw_text(
+            get_text(texts, "level_selection_title"), fonts["font"], (0, 0, 0)
+        )
+        t_rect.centerx, t_rect.y = screen.get_width() // 2, 80
+        screen.blit(t_surf, t_rect)
+
+        cols, total, sp, r = 5, 20, 100, 35
+        sx = (screen.get_width() - (cols - 1) * sp) // 2
+        sy = t_rect.bottom + 80
+
+        for i in range(total):
+            x, y = sx + (i % cols) * sp, sy + (i // cols) * sp
+            lr = pygame.Rect(x - r, y - r, r * 2, r * 2)
+            c = (150, 200, 255) if lr.collidepoint(mx, my) else (100, 150, 255)
+            pygame.draw.circle(screen, c, (x, y), r)
+            pygame.draw.circle(screen, (255, 255, 255), (x, y), r, 3)
+            ts, _ = draw_text(str(i + 1), fonts["small_font"], (255, 255, 255))
+            screen.blit(ts, ts.get_rect(center=(x, y)))
+            self.buttons["levels"][i + 1] = lr
+
+        b_surf, b_btn = draw_text(
+            get_text(texts, "back"), fonts["small_font"], (0, 0, 0)
+        )
+        b_btn.bottomleft = (20, game_state["HEIGHT"] - 20)
+        if b_btn.collidepoint(mx, my):
+            b_surf, _ = draw_text(
+                get_text(texts, "back"), fonts["small_font"], (255, 200, 0)
+            )
+        screen.blit(b_surf, b_btn)
+        self.buttons["back_btn"] = b_btn
+
+
+class GameplayState(State):
+    def __init__(self):
+        self.ui_buttons = {}
+
+    def handle_event(self, event, mx, my, game_state):
+        mb = game_state.get("main_bird")
+        is_paused = game_state["paused"] or (
+            game_state["game_mode"] == "campaign"
+            and (
+                game_state["campaign_is_processing"]
+                or game_state["campaign_is_swapping"]
+                or game_state["campaign_level_complete"]
+                or game_state.get("show_campaign_hint_popup")
+            )
+        )
+
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
+                game_state["state_manager"].change_state("main_menu", game_state)
+                if game_state["game_mode"] == "campaign":
+                    game_state["campaign_level_complete"] = False
+            elif event.key == pygame.K_r:
+                reset_game(game_state)
+            elif event.key == pygame.K_p or event.key == pygame.K_SPACE:
+                if (
+                    not game_state.get("training_complete")
+                    and not game_state.get("show_hint_popup")
+                    and not game_state.get("show_training_popup")
+                    and not game_state.get("show_campaign_hint_popup")
+                ):
+                    game_state["paused"] = not game_state["paused"]
+
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if game_state.get("show_campaign_hint_popup"):
+                if self.ui_buttons.get("close_hint") and self.ui_buttons[
+                    "close_hint"
+                ].collidepoint(mx, my):
+                    game_state["show_campaign_hint_popup"] = False
+                    game_state["paused"] = False
+                return
+            if game_state.get("show_training_popup"):
+                if self.ui_buttons.get("cont_training") and self.ui_buttons[
+                    "cont_training"
+                ].collidepoint(mx, my):
+                    game_state["show_training_popup"] = False
+                    game_state["paused"] = False
+                    get_next_bird(game_state)
+                return
+            if game_state.get("show_hint_popup"):
+                if self.ui_buttons.get("close_hint") and self.ui_buttons[
+                    "close_hint"
+                ].collidepoint(mx, my):
+                    game_state["show_hint_popup"] = False
+                    game_state["paused"] = False
+                return
+            if game_state.get("campaign_level_complete"):
+                if self.ui_buttons.get("restart_btn") and self.ui_buttons[
+                    "restart_btn"
+                ].collidepoint(mx, my):
+                    reset_game(game_state)
+                elif self.ui_buttons.get("exit_btn") and self.ui_buttons[
+                    "exit_btn"
+                ].collidepoint(mx, my):
+                    game_state["state_manager"].change_state("main_menu", game_state)
+                    game_state["campaign_level_complete"] = False
+                return
+            if game_state.get("training_complete"):
+                if self.ui_buttons.get("restart_btn") and self.ui_buttons[
+                    "restart_btn"
+                ].collidepoint(mx, my):
+                    reset_game(game_state)
+                elif self.ui_buttons.get("exit_btn") and self.ui_buttons[
+                    "exit_btn"
+                ].collidepoint(mx, my):
+                    game_state["state_manager"].change_state("main_menu", game_state)
+                    game_state["training_complete"] = False
+                return
+
+            sp_r = pygame.Rect(
+                game_state["WIDTH"] - int(50 * game_state["scale_factor"]),
+                int(10 * game_state["scale_factor"]),
+                int(40 * game_state["scale_factor"]),
+                int(40 * game_state["scale_factor"]),
+            )
+            ps_r = pygame.Rect(
+                game_state["WIDTH"] - int(100 * game_state["scale_factor"]),
+                int(10 * game_state["scale_factor"]),
+                int(40 * game_state["scale_factor"]),
+                int(40 * game_state["scale_factor"]),
+            )
+            lb_r = pygame.Rect(
+                game_state["WIDTH"] // 2 - int(30 * game_state["scale_factor"]),
+                int(10 * game_state["scale_factor"]),
+                int(60 * game_state["scale_factor"]),
+                int(40 * game_state["scale_factor"]),
+            )
+
+            if sp_r.collidepoint(mx, my):
+                game_state["sound_on"] = not game_state["sound_on"]
+                update_all_volumes(game_state)
+                return
+            if ps_r.collidepoint(mx, my):
+                game_state["paused"] = not game_state["paused"]
+                return
+            if lb_r.collidepoint(mx, my):
+                if game_state["game_mode"] == "campaign":
+                    game_state["show_campaign_hint_popup"] = True
+                else:
+                    game_state["show_hint_popup"] = True
+                game_state["paused"] = True
+                return
+
+            if game_state["game_mode"] == "campaign" and not is_paused:
+                gr = game_state["campaign_grid_rect"]
+                if gr.collidepoint(mx, my):
+                    cs = game_state["campaign_cell_size"]
+                    game_state["campaign_drag_start_pos"] = (mx, my)
+                    game_state["campaign_drag_start_tile"] = (
+                        int((my - gr.y) / cs),
+                        int((mx - gr.x) / cs),
+                    )
+                    game_state["campaign_is_dragging_tile"] = True
+            elif mb and not game_state.get("game_over") and not is_paused:
+                if mb.state == "idle" and mb.rect.collidepoint(mx, my):
+                    mb.start_drag()
+                    game_state["show_rope"] = True
+                elif (
+                    mb.state == "flying"
+                    and mb.type_index == 2
+                    and mb.boost_available
+                    and not mb.is_boosted
+                ):
+                    if game_state["sound_on"]:
+                        game_state["sounds"]["boost_sound"].play()
+                    mb.vx *= 2.0
+                    mb.vy *= 2.0
+                    mb.is_boosted = True
+                    game_state["boost_trail_start_time"] = time.time()
+                    create_spark_particle(game_state["spark_particles"], mb.x, mb.y)
+                elif mb.state == "flying" and mb.type_index == 3 and mb.split_available:
+                    split_bird(game_state)
+                elif (
+                    mb.state == "flying"
+                    and mb.type_index == 4
+                    and mb.boomerang_available
+                ):
+                    activate_boomerang(game_state)
+
+        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            game_state["campaign_is_dragging_tile"] = False
+            if game_state.get("campaign_drag_start_tile"):
+                sr, sc = game_state["campaign_drag_start_tile"]
+                smx, smy = game_state["campaign_drag_start_pos"]
+                dist = math.hypot(mx - smx, my - smy)
+                if dist < game_state["campaign_cell_size"] / 2:
+                    if game_state.get("campaign_selected_tile") is None:
+                        game_state["campaign_selected_tile"] = (sr, sc)
+                    else:
+                        sel_r, sel_c = game_state["campaign_selected_tile"]
+                        if abs(sr - sel_r) + abs(sc - sel_c) == 1:
+                            start_swap_animation(game_state, (sel_r, sel_c), (sr, sc))
+                        elif (sr, sc) == (sel_r, sel_c):
+                            game_state["campaign_selected_tile"] = None
+                        else:
+                            game_state["campaign_selected_tile"] = (sr, sc)
+                else:
+                    dx, dy = mx - smx, my - smy
+                    er, ec = sr, sc
+                    if abs(dx) > abs(dy):
+                        ec += 1 if dx > 0 else -1
+                    else:
+                        er += 1 if dy > 0 else -1
+                    start_swap_animation(game_state, (sr, sc), (er, ec))
+                game_state["campaign_drag_start_tile"] = None
+                game_state["campaign_drag_start_pos"] = None
+
+            if mb and mb.state == "dragging":
+                mb.launch(
+                    game_state["sling_x"],
+                    game_state["sling_y"],
+                    game_state["scale_factor"],
+                )
+                game_state["show_rope"] = False
+                game_state["current_shot_hit"] = False
+                game_state["last_shot_path"] = []
+                if game_state["sound_on"]:
+                    game_state["sounds"]["fly_sound"].play()
+
+    def update(self, game_state):
+        mb = game_state.get("main_bird")
+        is_paused = game_state["paused"] or (
+            game_state["game_mode"] == "campaign"
+            and (
+                game_state["campaign_is_processing"]
+                or game_state["campaign_is_swapping"]
+                or game_state["campaign_level_complete"]
+                or game_state.get("show_campaign_hint_popup")
+            )
+        )
+
+        mx, my = pygame.mouse.get_pos()
+        if mb and mb.state == "dragging" and not is_paused:
+            mb.drag_to(mx, my, game_state["WIDTH"], game_state["HEIGHT"])
+
+        if game_state.get("campaign_is_swapping"):
+            anim = game_state["campaign_swap_anim"]
+            anim["progress"] += 0.15
+            if anim["progress"] >= 1.0:
+                anim["progress"] = 1.0
+                r1, c1 = anim["tile1_pos"]
+                r2, c2 = anim["tile2_pos"]
+                if not anim["reverse"]:
+                    (
+                        game_state["campaign_board"][r1][c1],
+                        game_state["campaign_board"][r2][c2],
+                    ) = (
+                        game_state["campaign_board"][r2][c2],
+                        game_state["campaign_board"][r1][c1],
+                    )
+                    game_state["campaign_is_processing"] = True
+                    game_state["campaign_board_state"] = "idle"
+                game_state["campaign_is_swapping"] = False
+                game_state["campaign_swap_anim"] = None
+
+        if game_state["game_mode"] == "campaign" and game_state.get(
+            "campaign_is_processing"
+        ):
+            update_campaign_board(game_state)
+        update_game_state(game_state)
+
+        if (
+            not is_paused
+            and not game_state.get("game_over")
+            and not game_state.get("training_complete")
+        ):
+            if mb and mb.state == "jumping":
+                mb.update(
+                    game_state["gravity"],
+                    game_state["GROUND_LEVEL"],
+                    game_state["WIDTH"],
+                    game_state["HEIGHT"],
+                )
+            elif mb and mb.state in ["flying", "tumbling"]:
+                if (
+                    len(game_state["last_shot_path"]) == 0
+                    or math.hypot(
+                        game_state["last_shot_path"][-1][0] - mb.x,
+                        game_state["last_shot_path"][-1][1] - mb.y,
+                    )
+                    > 20
+                ):
+                    game_state["last_shot_path"].append((mb.x, mb.y))
+                if random.random() < 0.5:
+                    create_trail_particle(game_state["trail_particles"], mb.x, mb.y)
+                if (
+                    mb.update(
+                        game_state["gravity"],
+                        game_state["GROUND_LEVEL"],
+                        game_state["WIDTH"],
+                        game_state["HEIGHT"],
+                    )
+                    == "hit_ground"
+                ):
+                    create_dust_particle(
+                        game_state["dust_particles"],
+                        mb.x,
+                        game_state["GROUND_LEVEL"],
+                        count=20,
+                    )
+
+            if "targets" in game_state:
+                game_state["targets"].update(game_state["WIDTH"], game_state["HEIGHT"])
+            if "obstacles" in game_state:
+                game_state["obstacles"].update(
+                    game_state["WIDTH"], game_state["HEIGHT"]
+                )
+
+            for sb in game_state.get("small_birds", []):
+                if (
+                    sb.update(game_state["gravity"], game_state["GROUND_LEVEL"])
+                    == "hit_ground"
+                ):
+                    create_dust_particle(
+                        game_state["dust_particles"],
+                        sb.x,
+                        game_state["GROUND_LEVEL"],
+                        count=10,
+                    )
+            for dp in game_state.get("defeated_pigs", []):
+                if (
+                    dp.update(game_state["gravity"], game_state["GROUND_LEVEL"])
+                    == "hit_ground"
+                ):
+                    create_dust_particle(
+                        game_state["dust_particles"],
+                        dp.x,
+                        dp.y + dp.size // 2,
+                        count=30,
+                    )
+
+            if mb and mb.state in ["flying", "tumbling"]:
+                for t in pygame.sprite.spritecollide(
+                    mb, game_state.get("targets", []), False
+                ):
+                    game_state["current_shot_hit"] = True
+                    if mb.type_index == 1:
+                        game_state["screen_shake"] = 15
+                        game_state["explosion_center"] = t.rect.center
+                        game_state["explosion_active"] = True
+                        game_state["explosion_frames"] = game_state[
+                            "MAX_EXPLOSION_FRAMES"
+                        ]
+                        if game_state["sound_on"]:
+                            game_state["sounds"]["explosion_sound"].play()
+                        rem = [
+                            x
+                            for x in game_state["targets"]
+                            if math.hypot(
+                                x.rect.centerx - t.rect.centerx,
+                                x.rect.centery - t.rect.centery,
+                            )
+                            <= game_state["EXPLOSION_RADIUS"]
+                        ]
+                        for x in rem:
+                            game_state["defeated_pigs"].add(
+                                DefeatedPig(
+                                    x.rect.centerx,
+                                    x.rect.centery,
+                                    random.uniform(-2, 0),
+                                    game_state["object_size"],
+                                )
+                            )
+                            x.kill()
+                        if rem:
+                            game_state["score"] += len(rem)
+                            game_state["combo"] += len(rem)
+                            update_max_combo(game_state, game_state["current_profile"])
+                    else:
+                        create_feather_explosion(
+                            game_state["feather_particles"],
+                            t.rect.centerx,
+                            t.rect.centery,
+                            mb.type_index,
+                        )
+                        game_state["score"] += 1
+                        game_state["combo"] += 1
+                        update_max_combo(game_state, game_state["current_profile"])
+                        if game_state["sound_on"]:
+                            game_state["sounds"]["hit_sound"].play()
+                        game_state["defeated_pigs"].add(
+                            DefeatedPig(
+                                t.rect.centerx,
+                                t.rect.centery,
+                                -abs(mb.vy * 0.2),
+                                game_state["object_size"],
+                            )
+                        )
+                        t.kill()
+                    mb.state = "dead"
+                    break
+
+                if game_state["game_mode"] == "obstacle" and mb.state in [
+                    "flying",
+                    "tumbling",
+                ]:
+                    for o in pygame.sprite.spritecollide(
+                        mb, game_state.get("obstacles", []), False
+                    ):
+                        create_brick_shatter(
+                            game_state["dust_particles"], o.rect.centerx, o.rect.centery
+                        )
+                        o.kill()
+                        mb.vx *= 0.5
+                        mb.vy *= 0.5
+                        if game_state["sound_on"]:
+                            game_state["sounds"]["brick_sound"].play()
+                        break
+
+            for sb in game_state.get("small_birds", []):
+                if sb.state in ["flying", "tumbling"]:
+                    for t in pygame.sprite.spritecollide(
+                        sb, game_state.get("targets", []), False
+                    ):
+                        create_feather_explosion(
+                            game_state["feather_particles"],
+                            t.rect.centerx,
+                            t.rect.centery,
+                            3,
+                        )
+                        game_state["current_shot_hit"] = True
+                        game_state["score"] += 1
+                        game_state["combo"] += 1
+                        update_max_combo(game_state, game_state["current_profile"])
+                        game_state["defeated_pigs"].add(
+                            DefeatedPig(
+                                t.rect.centerx,
+                                t.rect.centery,
+                                0,
+                                game_state["object_size"],
+                            )
+                        )
+                        t.kill()
+                        sb.state = "dead"
+                        sb.kill()
+                        break
+                    if game_state["game_mode"] == "obstacle" and sb.state != "dead":
+                        for o in pygame.sprite.spritecollide(
+                            sb, game_state.get("obstacles", []), False
+                        ):
+                            create_brick_shatter(
+                                game_state["dust_particles"],
+                                o.rect.centerx,
+                                o.rect.centery,
+                            )
+                            o.kill()
+                            sb.vx *= 0.5
+                            sb.vy *= 0.5
+                            if game_state["sound_on"]:
+                                game_state["sounds"]["brick_sound"].play()
+                            break
+
+            for dp in [
+                x
+                for x in game_state.get("defeated_pigs", [])
+                if x.timer <= 0 and x.on_ground
+            ]:
+                dp.kill()
+                if game_state["game_mode"] not in ["training", "developer", "campaign"]:
+                    sm = SPEED_MULTIPLIER.get(game_state["difficulty"], 0)
+                    if game_state["game_mode"] != "sharpshooter":
+                        while True:
+                            nr = create_target(
+                                game_state["WIDTH"],
+                                game_state["HEIGHT"],
+                                game_state["object_size"],
+                            )
+                            if not any(
+                                nr.inflate(10, 10).colliderect(t.rect)
+                                for t in game_state["targets"]
+                            ) and not any(
+                                nr.inflate(10, 10).colliderect(o.rect)
+                                for o in game_state["obstacles"]
+                            ):
+                                game_state["targets"].add(
+                                    Target(
+                                        nr,
+                                        (
+                                            random.uniform(0.5, 2.0)
+                                            * sm
+                                            * random.choice([-1, 1])
+                                            if sm > 0
+                                            else 0
+                                        ),
+                                        (
+                                            random.uniform(0.5, 2.0)
+                                            * sm
+                                            * random.choice([-1, 1])
+                                            if sm > 0
+                                            else 0
+                                        ),
+                                    )
+                                )
+                                break
+                    else:
+                        game_state["targets"].add(
+                            Target(
+                                create_target(
+                                    game_state["WIDTH"],
+                                    game_state["HEIGHT"],
+                                    game_state["object_size"],
+                                ),
+                                (
+                                    random.uniform(0.5, 2.0)
+                                    * sm
+                                    * random.choice([-1, 1])
+                                    if sm > 0
+                                    else 0
+                                ),
+                                (
+                                    random.uniform(0.5, 2.0)
+                                    * sm
+                                    * random.choice([-1, 1])
+                                    if sm > 0
+                                    else 0
+                                ),
+                            )
+                        )
+                        game_state["target_timer_start"] = time.time()
+
+            if (
+                mb
+                and mb.state in ["stopped", "out_of_bounds", "dead"]
+                and len(game_state.get("small_birds", [])) == 0
+            ):
+                if mb.state in ["stopped", "out_of_bounds"]:
+                    if not game_state["current_shot_hit"] and game_state[
+                        "game_mode"
+                    ] not in ["developer", "training", "campaign"]:
+                        game_state["lives"] -= 1
+                        game_state["combo"] = 0
+                    mb.state = "dead"
+                get_next_bird(game_state)
+
+            if (
+                game_state["game_mode"] == "sharpshooter"
+                and len(game_state.get("targets", [])) > 0
+            ):
+                if (
+                    game_state["target_duration"]
+                    - (time.time() - game_state["target_timer_start"])
+                    <= 0
+                ):
+                    for t in game_state["targets"]:
+                        t.kill()
+                    game_state["lives"] -= 1
+                    game_state["combo"] = 0
+                    if game_state["lives"] > 0:
+                        sm = SPEED_MULTIPLIER.get(game_state["difficulty"], 0)
+                        game_state["targets"].add(
+                            Target(
+                                create_target(
+                                    game_state["WIDTH"],
+                                    game_state["HEIGHT"],
+                                    game_state["object_size"],
+                                ),
+                                (
+                                    random.uniform(0.5, 2.0)
+                                    * sm
+                                    * random.choice([-1, 1])
+                                    if sm > 0
+                                    else 0
+                                ),
+                                (
+                                    random.uniform(0.5, 2.0)
+                                    * sm
+                                    * random.choice([-1, 1])
+                                    if sm > 0
+                                    else 0
+                                ),
+                            )
+                        )
+                        game_state["target_timer_start"] = time.time()
+                    else:
+                        game_state["game_over"] = True
+
+    def draw(self, screen, mx, my, game_state):
+        shake = (0, 0)
+        if game_state.get("screen_shake", 0) > 0:
+            game_state["screen_shake"] -= 1
+            shake = (random.randint(-5, 5), random.randint(-5, 5))
+
+        bg = game_state["images"]["background"]
+        screen.blit(
+            bg,
             (
-                game_state["sling_x"] - power_text_surf.get_width() // 2,
-                bar_y + power_bar_height + 5,
+                bg.get_rect(center=screen.get_rect().center).left + shake[0],
+                bg.get_rect(center=screen.get_rect().center).top + shake[1],
+            ),
+        )
+        self.ui_buttons = {}
+
+        if game_state["game_mode"] == "campaign":
+            self._draw_campaign(screen, mx, my, game_state)
+        elif not game_state.get("training_complete"):
+            self._draw_normal(screen, mx, my, game_state)
+        else:
+            self._draw_tc(screen, mx, my, game_state)
+
+        if game_state["paused"]:
+            s = pygame.Surface(
+                (game_state["WIDTH"], game_state["HEIGHT"]), pygame.SRCALPHA
+            )
+            s.fill((0, 0, 0, 128))
+            screen.blit(s, (0, 0))
+            if (
+                not game_state.get("show_hint_popup")
+                and not game_state.get("show_training_popup")
+                and not game_state.get("show_campaign_hint_popup")
+            ):
+                p_surf, rect = draw_text(
+                    game_state["texts"]["pause"],
+                    game_state["fonts"]["large_font"],
+                    (255, 255, 255),
+                )
+                screen.blit(
+                    p_surf,
+                    p_surf.get_rect(
+                        center=(game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2)
+                    ),
+                )
+
+        draw_particles(screen, game_state["trail_particles"])
+        draw_particles(screen, game_state["dust_particles"])
+        draw_particles(screen, game_state["spark_particles"])
+        if not game_state["paused"]:
+            update_and_draw_feathers(
+                screen,
+                game_state["feather_particles"],
+                game_state["images"]["feather_imgs"],
+            )
+
+        if game_state.get("show_campaign_hint_popup"):
+            self._draw_chp(screen, mx, my, game_state)
+        elif game_state.get("show_training_popup"):
+            self._draw_tp(screen, mx, my, game_state)
+        elif game_state.get("show_hint_popup"):
+            self._draw_hp(screen, mx, my, game_state)
+
+    def _draw_campaign(self, screen, mx, my, game_state):
+        br, cs, board = (
+            game_state["campaign_grid_rect"],
+            game_state["campaign_cell_size"],
+            game_state["campaign_board"],
+        )
+        bs = pygame.Surface(br.size, pygame.SRCALPHA)
+        bs.fill((0, 0, 0, 100))
+        anim_pos = set()
+        if game_state.get("campaign_is_swapping"):
+            anim_pos.update(
+                [
+                    game_state["campaign_swap_anim"]["tile1_pos"],
+                    game_state["campaign_swap_anim"]["tile2_pos"],
+                ]
+            )
+        if game_state.get("campaign_is_dragging_tile"):
+            anim_pos.add(game_state["campaign_drag_start_tile"])
+
+        if board:
+            for r in range(CAMPAIGN_GRID_SIZE):
+                for c in range(CAMPAIGN_GRID_SIZE):
+                    if (r, c) in anim_pos:
+                        continue
+                    b_idx = board[r][c]
+                    if b_idx is not None:
+                        alpha, sf = 255, 0.9
+                        if game_state.get("campaign_board_state") == "clearing" and (
+                            r,
+                            c,
+                        ) in game_state.get("campaign_matched_tiles", []):
+                            p = game_state["campaign_clear_progress"]
+                            alpha, sf = int(255 * (1.0 - p)), 0.9 * (1.0 - p)
+                        if alpha > 0:
+                            img = game_state["images"]["bird_imgs"][b_idx]
+                            si = int(cs * sf)
+                            if si > 0:
+                                simg = pygame.transform.scale(img, (si, si))
+                                simg.set_alpha(alpha)
+                                bs.blit(
+                                    simg,
+                                    simg.get_rect(
+                                        center=(c * cs + cs / 2, r * cs + cs / 2)
+                                    ),
+                                )
+
+        def draw_at(idx, cx, cy, al=255):
+            img = pygame.transform.scale(
+                game_state["images"]["bird_imgs"][idx], (int(cs * 0.9), int(cs * 0.9))
+            )
+            img.set_alpha(al)
+            bs.blit(img, img.get_rect(center=(cx, cy)))
+
+        if game_state.get("campaign_is_swapping"):
+            anim = game_state["campaign_swap_anim"]
+            p = anim["progress"]
+            r1, c1 = anim["tile1_pos"]
+            r2, c2 = anim["tile2_pos"]
+            x1, y1 = c1 * cs + cs / 2, r1 * cs + cs / 2
+            x2, y2 = c2 * cs + cs / 2, r2 * cs + cs / 2
+            draw_at(anim["tile1_type"], x1 + (x2 - x1) * p, y1 + (y2 - y1) * p)
+            draw_at(anim["tile2_type"], x2 + (x1 - x2) * p, y2 + (y1 - y2) * p)
+
+        if game_state.get("campaign_is_dragging_tile"):
+            r, c = game_state["campaign_drag_start_tile"]
+            if board[r][c] is not None:
+                draw_at(board[r][c], c * cs + cs / 2, r * cs + cs / 2, 100)
+                draw_at(board[r][c], mx - br.x, my - br.y, 200)
+
+        def get_ay(td, ref=False):
+            return (
+                (
+                    (
+                        (td["end_pos"][0] + td["start_y_offset"])
+                        if ref
+                        else td["start_pos"][0]
+                    )
+                    * cs
+                )
+                + cs / 2
+                + (
+                    (
+                        (td["end_pos"][0] * cs + cs / 2)
+                        - (
+                            (
+                                (
+                                    (td["end_pos"][0] + td["start_y_offset"])
+                                    if ref
+                                    else td["start_pos"][0]
+                                )
+                                * cs
+                            )
+                            + cs / 2
+                        )
+                    )
+                    * td["progress"]
+                )
+            )
+
+        if game_state.get("campaign_board_state") == "falling":
+            for t in game_state.get("campaign_falling_tiles", []):
+                draw_at(t["type"], t["end_pos"][1] * cs + cs / 2, get_ay(t))
+        if game_state.get("campaign_board_state") == "refilling":
+            for t in game_state.get("campaign_refilling_tiles", []):
+                draw_at(t["type"], t["end_pos"][1] * cs + cs / 2, get_ay(t, True))
+
+        if game_state.get("campaign_selected_tile") and not game_state.get(
+            "campaign_is_swapping"
+        ):
+            pygame.draw.rect(
+                bs,
+                (255, 255, 0, 200),
+                (
+                    game_state["campaign_selected_tile"][1] * cs,
+                    game_state["campaign_selected_tile"][0] * cs,
+                    cs,
+                    cs,
+                ),
+                4,
+                border_radius=5,
+            )
+
+        screen.blit(bs, br.topleft)
+        screen.blit(
+            draw_text(
+                f"{get_text(game_state['texts'], 'score_colon')} {game_state['campaign_score']} / {game_state['campaign_target_score']}",
+                game_state["fonts"]["small_font"],
+                (0, 0, 0),
+            )[0],
+            (br.left, br.top - 40),
+        )
+
+        if game_state["sound_on"]:
+            screen.blit(
+                game_state["images"]["speaker_on_img"], (game_state["WIDTH"] - 50, 10)
+            )
+        else:
+            screen.blit(
+                game_state["images"]["speaker_off_img"], (game_state["WIDTH"] - 50, 10)
+            )
+        if game_state["paused"]:
+            screen.blit(
+                game_state["images"]["resume_img"], (game_state["WIDTH"] - 100, 10)
+            )
+        else:
+            screen.blit(
+                game_state["images"]["pause_img"], (game_state["WIDTH"] - 100, 10)
+            )
+        screen.blit(
+            game_state["images"]["lightbulb_img"],
+            (
+                game_state["WIDTH"] // 2 - int(30 * game_state["scale_factor"]),
+                int(10 * game_state["scale_factor"]),
             ),
         )
 
-    # Веревка рогатки
-    if game_state.get("show_rope") and mb and mb.state == "dragging":
-        pygame.draw.line(
+        if game_state.get("campaign_level_complete"):
+            ov = pygame.Surface(
+                (game_state["WIDTH"], game_state["HEIGHT"]), pygame.SRCALPHA
+            )
+            ov.fill((0, 0, 0, 180))
+            screen.blit(ov, (0, 0))
+            ws, wr = draw_text(
+                get_text(game_state["texts"], "campaign_win"),
+                game_state["fonts"]["font"],
+                (255, 215, 0),
+            )
+            wr.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2 - 50)
+            screen.blit(ws, wr)
+            rs, rb = draw_text(
+                get_text(game_state["texts"], "training_restart"),
+                game_state["fonts"]["small_font"],
+                (255, 255, 255),
+            )
+            rb.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2 + 20)
+            if rb.collidepoint(mx, my):
+                rs, _ = draw_text(
+                    get_text(game_state["texts"], "training_restart"),
+                    game_state["fonts"]["small_font"],
+                    (255, 200, 0),
+                )
+            screen.blit(rs, rb)
+            self.ui_buttons["restart_btn"] = rb
+            es, eb = draw_text(
+                get_text(game_state["texts"], "training_exit_to_menu"),
+                game_state["fonts"]["small_font"],
+                (255, 255, 255),
+            )
+            eb.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2 + 70)
+            if eb.collidepoint(mx, my):
+                es, _ = draw_text(
+                    get_text(game_state["texts"], "training_exit_to_menu"),
+                    game_state["fonts"]["small_font"],
+                    (255, 200, 0),
+                )
+            screen.blit(es, eb)
+            self.ui_buttons["exit_btn"] = eb
+
+    def _draw_normal(self, screen, mx, my, game_state):
+        gl, sc, qx, qg, bs = (
+            game_state["GROUND_LEVEL"],
+            game_state["scale_factor"],
+            int(40 * game_state["scale_factor"]),
+            int(60 * game_state["scale_factor"]),
+            game_state["object_size"],
+        )
+        for i, b in enumerate(game_state["bird_queue"]):
+            screen.blit(b, (qx + i * qg, gl - bs * 0.9))
+        pygame.draw.circle(
             screen,
             (139, 69, 19),
             (game_state["sling_x"], game_state["sling_y"]),
-            (int(mb.x), int(mb.y)),
-            int(3 * scale),
+            int(5 * sc),
         )
 
-    # Отрисовка объектов (ООП)
-    if mb:
-        if mb.state == "jumping" and mb.jump_image:
-            screen.blit(mb.jump_image, (mb.x - mb.size // 2, mb.y - mb.size // 2))
-        elif mb.state != "dead":
-            mb.draw(screen)
-
-    for target in game_state.get("targets", []):
-        screen.blit(images["target_img"], target.rect)
-
-    for obs in game_state.get("obstacles", []):
-        screen.blit(images["brick_img"], obs.rect)
-
-    for dp in game_state.get("defeated_pigs", []):
-        dp.draw(screen, images["target_defeated_img"])
-
-    for sb in game_state.get("small_birds", []):
-        sb.draw(screen, images["small_bird_img"])
-
-    # UI кнопки звука и паузы
-    if game_state["sound_on"]:
-        screen.blit(images["speaker_on_img"], (game_state["WIDTH"] - 50, 10))
-    else:
-        screen.blit(images["speaker_off_img"], (game_state["WIDTH"] - 50, 10))
-    if game_state["paused"]:
-        screen.blit(images["resume_img"], (game_state["WIDTH"] - 100, 10))
-    else:
-        screen.blit(images["pause_img"], (game_state["WIDTH"] - 100, 10))
-
-    # UI Очки и Статистика
-    if game_state["game_over"]:
-        go_surf, go_rect = draw_text(
-            get_text(texts, "game_over"), fonts["font"], (255, 0, 0)
-        )
-        go_rect.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2)
-        screen.blit(go_surf, go_rect)
-
-    if game_state["game_mode"] != "sharpshooter":
-        screen.blit(
-            draw_text(
-                f"{texts['score_colon']} {game_state['score']}",
-                fonts["small_font"],
+        mb = game_state.get("main_bird")
+        if mb and mb.state == "dragging" and not game_state.get("paused"):
+            dx, dy = game_state["sling_x"] - mb.x, game_state["sling_y"] - mb.y
+            bw, bh, md = int(150 * sc), int(15 * sc), int(150 * sc)
+            pp = min(math.hypot(dx, dy), md) / md
+            bx, by = game_state["sling_x"] - bw // 2, game_state["sling_y"] + int(
+                30 * sc
+            )
+            pygame.draw.rect(screen, (100, 100, 100), (bx, by, bw, bh))
+            pygame.draw.rect(
+                screen,
+                (int(255 * pp), int(255 * (1 - pp)), 0),
+                (bx, by, int(bw * pp), bh),
+            )
+            pts, _ = draw_text(
+                f"{get_text(game_state['texts'], 'power_colon')} {int(pp * 100)}%",
+                game_state["fonts"]["small_font"],
                 (0, 0, 0),
-            )[0],
-            (10, 10),
-        )
-        lives_text = (
-            texts["lives_infinite"]
-            if game_state["lives"] == float("inf")
-            else f"{texts['lives_colon']} {game_state['lives']}"
-        )
-        screen.blit(draw_text(lives_text, fonts["small_font"], (0, 0, 0))[0], (10, 50))
-        screen.blit(
-            draw_text(
-                f"{texts['combo_colon']} {game_state['combo']}",
-                fonts["small_font"],
-                (0, 0, 0),
-            )[0],
-            (10, 90),
-        )
-    else:
-        time_left = 0
-        if (
-            not game_state.get("paused")
-            and not game_state["game_over"]
-            and len(game_state.get("targets", [])) > 0
-        ):
-            time_left = max(
-                0,
-                game_state["target_duration"]
-                - (time.time() - game_state["target_timer_start"]),
+            )
+            screen.blit(
+                pts, (game_state["sling_x"] - pts.get_width() // 2, by + bh + 5)
+            )
+            if game_state.get("show_rope"):
+                pygame.draw.line(
+                    screen,
+                    (139, 69, 19),
+                    (game_state["sling_x"], game_state["sling_y"]),
+                    (int(mb.x), int(mb.y)),
+                    int(3 * sc),
+                )
+
+        if mb:
+            if mb.state == "jumping" and mb.jump_image:
+                screen.blit(mb.jump_image, (mb.x - mb.size // 2, mb.y - mb.size // 2))
+            elif mb.state != "dead":
+                mb.draw(screen)
+
+        for t in game_state.get("targets", []):
+            screen.blit(game_state["images"]["target_img"], t.rect)
+        for o in game_state.get("obstacles", []):
+            screen.blit(game_state["images"]["brick_img"], o.rect)
+        for d in game_state.get("defeated_pigs", []):
+            d.draw(screen, game_state["images"]["target_defeated_img"])
+        for s in game_state.get("small_birds", []):
+            s.draw(screen, game_state["images"]["small_bird_img"])
+
+        if game_state["sound_on"]:
+            screen.blit(
+                game_state["images"]["speaker_on_img"], (game_state["WIDTH"] - 50, 10)
+            )
+        else:
+            screen.blit(
+                game_state["images"]["speaker_off_img"], (game_state["WIDTH"] - 50, 10)
+            )
+        if game_state["paused"]:
+            screen.blit(
+                game_state["images"]["resume_img"], (game_state["WIDTH"] - 100, 10)
+            )
+        else:
+            screen.blit(
+                game_state["images"]["pause_img"], (game_state["WIDTH"] - 100, 10)
             )
         screen.blit(
-            draw_text(
-                f"{texts['time_colon']} {time_left:.1f}s",
-                fonts["small_font"],
+            game_state["images"]["lightbulb_img"],
+            (
+                game_state["WIDTH"] // 2 - int(30 * game_state["scale_factor"]),
+                int(10 * game_state["scale_factor"]),
+            ),
+        )
+
+        if game_state.get("game_over"):
+            go, gr = draw_text(
+                get_text(game_state["texts"], "game_over"),
+                game_state["fonts"]["font"],
                 (255, 0, 0),
-            )[0],
-            (10, 10),
+            )
+            screen.blit(
+                go,
+                go.get_rect(
+                    center=(game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2)
+                ),
+            )
+
+        if game_state["game_mode"] != "sharpshooter":
+            screen.blit(
+                draw_text(
+                    f"{game_state['texts']['score_colon']} {game_state['score']}",
+                    game_state["fonts"]["small_font"],
+                    (0, 0, 0),
+                )[0],
+                (10, 10),
+            )
+            screen.blit(
+                draw_text(
+                    (
+                        game_state["texts"]["lives_infinite"]
+                        if game_state["lives"] == float("inf")
+                        else f"{game_state['texts']['lives_colon']} {game_state['lives']}"
+                    ),
+                    game_state["fonts"]["small_font"],
+                    (0, 0, 0),
+                )[0],
+                (10, 50),
+            )
+            screen.blit(
+                draw_text(
+                    f"{game_state['texts']['combo_colon']} {game_state['combo']}",
+                    game_state["fonts"]["small_font"],
+                    (0, 0, 0),
+                )[0],
+                (10, 90),
+            )
+        else:
+            tl = (
+                max(
+                    0,
+                    game_state["target_duration"]
+                    - (time.time() - game_state["target_timer_start"]),
+                )
+                if not game_state.get("paused")
+                and not game_state.get("game_over")
+                and len(game_state.get("targets", [])) > 0
+                else 0
+            )
+            screen.blit(
+                draw_text(
+                    f"{game_state['texts']['time_colon']} {tl:.1f}s",
+                    game_state["fonts"]["small_font"],
+                    (255, 0, 0),
+                )[0],
+                (10, 10),
+            )
+            screen.blit(
+                draw_text(
+                    f"{game_state['texts']['score_colon']} {game_state['score']}",
+                    game_state["fonts"]["small_font"],
+                    (0, 0, 0),
+                )[0],
+                (10, 50),
+            )
+            screen.blit(
+                draw_text(
+                    f"{game_state['texts']['combo_colon']} {game_state['combo']}",
+                    game_state["fonts"]["small_font"],
+                    (0, 0, 0),
+                )[0],
+                (10, 90),
+            )
+            screen.blit(
+                draw_text(
+                    (
+                        game_state["texts"]["lives_infinite"]
+                        if game_state["lives"] == float("inf")
+                        else f"{game_state['texts']['lives_colon']} {game_state['lives']}"
+                    ),
+                    game_state["fonts"]["small_font"],
+                    (0, 0, 0),
+                )[0],
+                (10, 130),
+            )
+
+    def _draw_tc(self, screen, mx, my, game_state):
+        ov = pygame.Surface(
+            (game_state["WIDTH"], game_state["HEIGHT"]), pygame.SRCALPHA
+        )
+        ov.fill((0, 0, 0, 180))
+        screen.blit(ov, (0, 0))
+        ts, tr = draw_text(
+            get_text(game_state["texts"], "training_complete_title"),
+            game_state["fonts"]["font"],
+            (255, 215, 0),
         )
         screen.blit(
-            draw_text(
-                f"{texts['score_colon']} {game_state['score']}",
-                fonts["small_font"],
-                (0, 0, 0),
-            )[0],
-            (10, 50),
+            ts,
+            ts.get_rect(
+                center=(game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2 - 50)
+            ),
         )
-        screen.blit(
-            draw_text(
-                f"{texts['combo_colon']} {game_state['combo']}",
-                fonts["small_font"],
-                (0, 0, 0),
-            )[0],
-            (10, 90),
+        rs, rb = draw_text(
+            get_text(game_state["texts"], "training_restart"),
+            game_state["fonts"]["small_font"],
+            (255, 255, 255),
         )
-        lives_text = (
-            texts["lives_infinite"]
-            if game_state["lives"] == float("inf")
-            else f"{texts['lives_colon']} {game_state['lives']}"
+        rb.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2 + 20)
+        if rb.collidepoint(mx, my):
+            rs, _ = draw_text(
+                get_text(game_state["texts"], "training_restart"),
+                game_state["fonts"]["small_font"],
+                (255, 200, 0),
+            )
+        screen.blit(rs, rb)
+        self.ui_buttons["restart_btn"] = rb
+        es, eb = draw_text(
+            get_text(game_state["texts"], "training_exit_to_menu"),
+            game_state["fonts"]["small_font"],
+            (255, 255, 255),
         )
-        screen.blit(draw_text(lives_text, fonts["small_font"], (0, 0, 0))[0], (10, 130))
+        eb.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2 + 70)
+        if eb.collidepoint(mx, my):
+            es, _ = draw_text(
+                get_text(game_state["texts"], "training_exit_to_menu"),
+                game_state["fonts"]["small_font"],
+                (255, 200, 0),
+            )
+        screen.blit(es, eb)
+        self.ui_buttons["exit_btn"] = eb
+
+    def _draw_chp(self, screen, mx, my, game_state):
+        ov = pygame.Surface(
+            (game_state["WIDTH"], game_state["HEIGHT"]), pygame.SRCALPHA
+        )
+        ov.fill((0, 0, 0, 180))
+        screen.blit(ov, (0, 0))
+        dr = pygame.Rect(0, 0, 700, 300)
+        dr.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2)
+        pygame.draw.rect(screen, (60, 60, 80), dr)
+        pygame.draw.rect(screen, (210, 210, 230), dr, 3)
+        ts, tr = draw_text(
+            get_text(game_state["texts"], "campaign_hint_title"),
+            game_state["fonts"]["small_font"],
+            (255, 215, 0),
+        )
+        screen.blit(ts, ts.get_rect(centerx=dr.centerx, y=dr.y + 20))
+
+        f, x, y, sp = (
+            game_state["fonts"]["pedia_font"],
+            dr.left + 20,
+            dr.y + 70,
+            game_state["fonts"]["pedia_font"].size(" ")[0],
+        )
+        for w in get_text(game_state["texts"], "campaign_hint_text").split(" "):
+            ws = f.render(w, True, (255, 255, 255))
+            if x + ws.get_width() >= dr.right - 20:
+                x, y = dr.left + 20, y + f.get_linesize()
+            screen.blit(ws, (x, y))
+            x += ws.get_width() + sp
+
+        cs, cb = draw_text(
+            get_text(game_state["texts"], "hint_popup_close"),
+            game_state["fonts"]["small_font"],
+            (255, 255, 255),
+        )
+        cb.center = (dr.centerx, dr.bottom - 40)
+        if cb.collidepoint(mx, my):
+            cs, _ = draw_text(
+                get_text(game_state["texts"], "hint_popup_close"),
+                game_state["fonts"]["small_font"],
+                (120, 255, 120),
+            )
+        screen.blit(cs, cb)
+        self.ui_buttons["close_hint"] = cb
+
+    def _draw_tp(self, screen, mx, my, game_state):
+        ov = pygame.Surface(
+            (game_state["WIDTH"], game_state["HEIGHT"]), pygame.SRCALPHA
+        )
+        ov.fill((0, 0, 0, 180))
+        screen.blit(ov, (0, 0))
+        dr = pygame.Rect(0, 0, 700, 250)
+        dr.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2)
+        pygame.draw.rect(screen, (50, 70, 50), dr)
+        pygame.draw.rect(screen, (200, 220, 200), dr, 3)
+
+        f, x, y, sp = (
+            game_state["fonts"]["small_font"],
+            dr.left + 20,
+            dr.y + 20,
+            game_state["fonts"]["small_font"].size(" ")[0],
+        )
+        for w in game_state.get("training_popup_text", "").split(" "):
+            ws = f.render(w, True, (255, 255, 255))
+            if x + ws.get_width() >= dr.right - 20:
+                x, y = dr.left + 20, y + f.get_linesize()
+            screen.blit(ws, (x, y))
+            x += ws.get_width() + sp
+
+        cs, cb = draw_text(
+            get_text(game_state["texts"], "training_popup_continue"),
+            game_state["fonts"]["small_font"],
+            (255, 255, 255),
+        )
+        cb.center = (dr.centerx, dr.bottom - 40)
+        if cb.collidepoint(mx, my):
+            cs, _ = draw_text(
+                get_text(game_state["texts"], "training_popup_continue"),
+                game_state["fonts"]["small_font"],
+                (120, 255, 120),
+            )
+        screen.blit(cs, cb)
+        self.ui_buttons["cont_training"] = cb
+
+    def _draw_hp(self, screen, mx, my, game_state):
+        ov = pygame.Surface(
+            (game_state["WIDTH"], game_state["HEIGHT"]), pygame.SRCALPHA
+        )
+        ov.fill((0, 0, 0, 180))
+        screen.blit(ov, (0, 0))
+        dr = pygame.Rect(0, 0, 600, 250)
+        dr.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2)
+        pygame.draw.rect(screen, (60, 60, 80), dr)
+        pygame.draw.rect(screen, (210, 210, 230), dr, 3)
+
+        bn_ru = game_state.get("bird_image_to_name", {}).get(
+            game_state.get("current_bird_img"), "Неизвестная птица"
+        )
+        try:
+            bn = get_text(game_state["texts"], "pedia_items")[
+                list(game_state.get("bird_image_to_name", {}).values()).index(bn_ru)
+            ]
+        except:
+            bn = get_text(game_state["texts"], "unknown_bird")
+
+        ts, tr = draw_text(bn, game_state["fonts"]["small_font"], (255, 215, 0))
+        screen.blit(ts, ts.get_rect(centerx=dr.centerx, y=dr.y + 20))
+
+        f, x, y, sp = (
+            game_state["fonts"]["pedia_font"],
+            dr.left + 20,
+            dr.y + 70,
+            game_state["fonts"]["pedia_font"].size(" ")[0],
+        )
+        for w in (
+            get_text(game_state["texts"], "pedia_descriptions")
+            .get(bn, get_text(game_state["texts"], "no_bird_on_slingshot"))
+            .split(" ")
+        ):
+            ws = f.render(w, True, (255, 255, 255))
+            if x + ws.get_width() >= dr.right - 20:
+                x, y = dr.left + 20, y + f.get_linesize()
+            screen.blit(ws, (x, y))
+            x += ws.get_width() + sp
+
+        cs, cb = draw_text(
+            get_text(game_state["texts"], "hint_popup_close"),
+            game_state["fonts"]["small_font"],
+            (255, 255, 255),
+        )
+        cb.center = (dr.centerx, dr.bottom - 30)
+        if cb.collidepoint(mx, my):
+            cs, _ = draw_text(
+                get_text(game_state["texts"], "hint_popup_close"),
+                game_state["fonts"]["small_font"],
+                (120, 255, 120),
+            )
+        screen.blit(cs, cb)
+        self.ui_buttons["close_hint"] = cb
