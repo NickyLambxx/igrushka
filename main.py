@@ -19,9 +19,9 @@ from achievements import (
     save_user_settings,
 )
 from game_objects import (
-    reset_game,
     update_all_volumes,
     play_music_track,
+    reset_game,
     CAMPAIGN_GRID_SIZE,
     BASE_WIDTH,
 )
@@ -38,8 +38,9 @@ from game_states import (
     BirdpediaMenuState,
     BirdpediaDetailState,
     LevelSelectionState,
-    GameplayState,
 )
+from match3_game import Match3State
+from slingshot_game import SlingshotState
 from localization import LANGUAGES
 
 MUSIC_END_EVENT = pygame.USEREVENT + 1
@@ -197,7 +198,10 @@ def init_game():
     state_manager.add_state("achievements_menu", AchievementsMenuState())
     state_manager.add_state("birdpedia_menu", BirdpediaMenuState())
     state_manager.add_state("birdpedia_detail", BirdpediaDetailState())
-    state_manager.add_state("gameplay", GameplayState())
+
+    # Регистрация изолированных движков
+    state_manager.add_state("match3", Match3State())
+    state_manager.add_state("slingshot", SlingshotState())
 
     game_state["state_manager"] = state_manager
     state_manager.change_state("profile_menu", game_state)
@@ -215,13 +219,9 @@ def main():
     clock = game_state["clock"]
 
     while sm.running:
-        # Вычисление Delta Time (секунды, прошедшие с прошлого кадра)
         dt = clock.tick(60) / 1000.0
         mx, my = pygame.mouse.get_pos()
 
-        # ==========================================
-        # 1. CONTROLLER (ОБРАБОТКА ВВОДА И СОБЫТИЙ)
-        # ==========================================
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 sm.running = False
@@ -233,17 +233,9 @@ def main():
             else:
                 sm.current_state.handle_event(event, mx, my, game_state)
 
-        # ==========================================
-        # 2. MODEL (ОБНОВЛЕНИЕ ЛОГИКИ С УЧЕТОМ dt)
-        # ==========================================
         sm.current_state.update(dt, mx, my, game_state)
-
-        # ==========================================
-        # 3. VIEW (ОТРИСОВКА ВИЗУАЛА)
-        # ==========================================
         sm.current_state.draw(game_state["screen"], mx, my, game_state)
 
-        # Глобальная отрисовка затемнения (настройки экрана)
         brightness = game_state["brightness_slider_pos"]
         if brightness < 1.0:
             overlay = pygame.Surface(
@@ -252,7 +244,6 @@ def main():
             overlay.fill((0, 0, 0, int(255 * (1.0 - brightness))))
             game_state["screen"].blit(overlay, (0, 0))
 
-        # Глобальная отрисовка всплывающего достижения (поверх всего)
         if (
             game_state.get("achievement_text")
             and time.time() < game_state["achievement_show_time"]
@@ -270,7 +261,6 @@ def main():
         elif game_state.get("achievement_text"):
             game_state["achievement_text"] = ""
 
-        # Курсор
         if game_state["images"].get("cursor_img"):
             game_state["screen"].blit(game_state["images"]["cursor_img"], (mx, my))
 
