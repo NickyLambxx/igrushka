@@ -65,6 +65,7 @@ from game_states import (
     draw_campaign_hint_popup,
 )
 from localization import LANGUAGES
+from entities import Target, Obstacle, DefeatedPig
 
 
 MUSIC_END_EVENT = pygame.USEREVENT + 1
@@ -141,30 +142,12 @@ def init_game():
         "GROUND_LEVEL": INITIAL_HEIGHT - int(10 * ui_scale_factor),
         "EXPLOSION_RADIUS": int(EXPLOSION_RADIUS * game_scale_factor),
         "MAX_EXPLOSION_FRAMES": MAX_EXPLOSION_FRAMES,
-        "projectile_x": sling_x,
-        "projectile_y": sling_y,
-        "projectile_rect": pygame.Rect(
-            sling_x - object_size // 2,
-            sling_y - object_size // 2,
-            object_size,
-            object_size,
-        ),
-        "is_dragging": False,
-        "is_moving": False,
-        "show_rope": False,
-        "velocity_x": 0,
-        "velocity_y": 0,
         "gravity": 0.5 * game_scale_factor,
         "explosion_active": False,
         "explosion_center": (0, 0),
         "explosion_frames": 0,
-        "third_bird_boosted": False,
         "boost_trail_start_time": None,
-        "boost_available": False,
-        "split_available": False,
-        "boomerang_available": False,
         "paused": False,
-        "small_birds": [],
         "combo": 0,
         "difficulty": "easy",
         "game_mode": "classic",
@@ -186,11 +169,6 @@ def init_game():
         "game_over": False,
         "current_bird_img": None,
         "bird_queue": [],
-        "targets": [],
-        "target_speeds": [],
-        "obstacles": [],
-        "obstacle_speeds": [],
-        "defeated_pigs": [],
         "target_timer_start": None,
         "target_duration": 5,
         "trail_particles": [],
@@ -207,16 +185,8 @@ def init_game():
         "texts": LANGUAGES.get(current_language, LANGUAGES["ru"]),
         "current_shot_hit": False,
         "screen_shake": 0,
-        "bird_is_jumping": False,
-        "jump_progress": 0,
-        "jump_start_pos": (0, 0),
-        "jump_bird_img": None,
         "current_music_track_index": random.randint(0, 4),
         "show_achievements_reset_confirm": False,
-        "projectile_angle": 0,
-        "is_tumbling": False,
-        "tumble_timer": 0,
-        "angular_velocity": 0,
         "last_shot_path": [],
         "path_display_timer": 0,
         "all_profiles_data": all_profiles_data,
@@ -347,6 +317,8 @@ def play_music_track(game_state, track_index):
 
 
 def get_next_bird(game_state):
+    mb = game_state.get("main_bird")
+
     if game_state["last_shot_path"]:
         game_state["path_display_timer"] = time.time() + 0.75
 
@@ -360,6 +332,8 @@ def get_next_bird(game_state):
             ):
                 game_state["training_complete"] = True
                 game_state["current_bird_img"] = None
+                if mb:
+                    mb.image = None
                 return
             else:
                 game_state["show_training_popup"] = True
@@ -367,54 +341,43 @@ def get_next_bird(game_state):
                     "training_descriptions"
                 ][game_state["training_bird_index"]]
                 game_state["current_bird_img"] = None
+                if mb:
+                    mb.image = None
                 return
+        idx = game_state["training_bird_index"]
+        game_state["current_bird_img"] = game_state["images"]["bird_imgs"][idx]
+        if mb:
+            mb.set_image(game_state["current_bird_img"], idx)
+            mb.reset_to_sling()
     else:
-        if game_state["lives"] <= 0:
+        if game_state["lives"] <= 0 or not game_state["bird_queue"]:
             game_state["game_over"] = True
             game_state["current_bird_img"] = None
-            return
-        if not game_state["bird_queue"]:
-            game_state["game_over"] = True
-            game_state["current_bird_img"] = None
+            if mb:
+                mb.image = None
             return
 
-    game_state["is_moving"] = False
-    game_state["is_tumbling"] = False
-    game_state["third_bird_boosted"] = False
-    game_state["boost_available"] = False
-    game_state["split_available"] = False
-    game_state["boomerang_available"] = False
-    game_state["projectile_angle"] = 0
-    game_state["projectile_x"], game_state["projectile_y"] = (
-        game_state["sling_x"],
-        game_state["sling_y"],
-    )
-
-    if game_state["game_mode"] == "training":
-        game_state["current_bird_img"] = game_state["images"]["bird_imgs"][
-            game_state["training_bird_index"]
-        ]
-    else:
-        game_state["bird_is_jumping"] = True
-        game_state["jump_progress"] = 0
-        game_state["jump_start_pos"] = (
-            int(40 * game_state["scale_factor"]),
-            game_state["GROUND_LEVEL"] - game_state["object_size"] * 0.9,
-        )
-        game_state["jump_bird_img"] = game_state["bird_queue"].pop(0)
+        game_state["current_shot_hit"] = False
+        bird_img = game_state["bird_queue"].pop(0)
+        game_state["current_bird_img"] = bird_img
         game_state["bird_queue"].append(
             random.choice(game_state["images"]["bird_imgs"])
         )
 
+        try:
+            idx = game_state["images"]["bird_imgs"].index(bird_img)
+        except ValueError:
+            idx = 0
 
-def add_new_speed(game_state):
-    speed_multiplier = SPEED_MULTIPLIER.get(game_state["difficulty"], 0)
-    if speed_multiplier > 0:
-        dx = random.uniform(0.5, 2.0) * speed_multiplier * random.choice([-1, 1])
-        dy = random.uniform(0.5, 2.0) * speed_multiplier * random.choice([-1, 1])
-        game_state["target_speeds"].append((dx, dy))
-    else:
-        game_state["target_speeds"].append((0, 0))
+        if mb:
+            mb.jump_start_pos = (
+                int(40 * game_state["scale_factor"]),
+                game_state["GROUND_LEVEL"] - game_state["object_size"] * 0.9,
+            )
+            mb.jump_image = bird_img
+            mb.type_index = idx
+            mb.state = "jumping"
+            mb.jump_progress = 0
 
 
 def update_max_combo(game_state, profile_name):
@@ -517,6 +480,7 @@ def main():
         )
         mx, my = pygame.mouse.get_pos()
         click_processed = False
+        mb = game_state.get("main_bird")
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -538,9 +502,7 @@ def main():
                     ):
                         game_state["profile_input_text"] += event.unicode
                 elif event.key == pygame.K_ESCAPE:
-                    if game_state["initial_profile_selection"]:
-                        pass
-                    else:
+                    if not game_state["initial_profile_selection"]:
                         game_state.update(
                             {
                                 "menu": True,
@@ -644,60 +606,41 @@ def main():
                                 game_state["campaign_drag_start_tile"] = (r, c)
                                 game_state["campaign_is_dragging_tile"] = True
                         elif (
-                            game_state["current_bird_img"]
+                            mb
                             and not game_state["game_over"]
-                            and not game_state["bird_is_jumping"]
-                            and math.hypot(
-                                mx - game_state["projectile_x"],
-                                my - game_state["projectile_y"],
-                            )
-                            <= game_state["object_size"] // 2
-                            and not game_state["is_moving"]
                             and not is_gameplay_paused
                         ):
-                            game_state["is_dragging"] = True
-                            game_state["show_rope"] = True
-                        elif (
-                            game_state["is_moving"]
-                            and game_state["current_bird_img"]
-                            == game_state["images"]["bird_imgs"][2]
-                            and game_state["boost_available"]
-                            and not game_state["third_bird_boosted"]
-                            and not is_gameplay_paused
-                        ):
-                            if game_state["sound_on"]:
-                                game_state["sounds"]["boost_sound"].play()
-                            game_state["velocity_x"] *= 2.0
-                            game_state["velocity_y"] *= 2.0
-                            game_state["third_bird_boosted"] = True
-                            game_state["boost_trail_start_time"] = time.time()
-                            create_spark_particle(
-                                game_state["spark_particles"],
-                                game_state["projectile_x"],
-                                game_state["projectile_y"],
-                            )
-                        elif (
-                            game_state["is_moving"]
-                            and game_state["current_bird_img"]
-                            == game_state["images"]["bird_imgs"][3]
-                            and game_state["split_available"]
-                            and not is_gameplay_paused
-                        ):
-                            split_bird(
-                                game_state,
-                                game_state["projectile_x"],
-                                game_state["projectile_y"],
-                                game_state["velocity_x"],
-                                game_state["velocity_y"],
-                            )
-                        elif (
-                            game_state["is_moving"]
-                            and game_state["current_bird_img"]
-                            == game_state["images"]["bird_imgs"][4]
-                            and game_state["boomerang_available"]
-                            and not is_gameplay_paused
-                        ):
-                            activate_boomerang(game_state)
+                            if mb.state == "idle" and mb.rect.collidepoint(mx, my):
+                                mb.start_drag()
+                                game_state["show_rope"] = True
+                            elif (
+                                mb.state == "flying"
+                                and mb.type_index == 2
+                                and mb.boost_available
+                                and not mb.is_boosted
+                            ):
+                                if game_state["sound_on"]:
+                                    game_state["sounds"]["boost_sound"].play()
+                                mb.vx *= 2.0
+                                mb.vy *= 2.0
+                                mb.is_boosted = True
+                                game_state["boost_trail_start_time"] = time.time()
+                                create_spark_particle(
+                                    game_state["spark_particles"], mb.x, mb.y
+                                )
+                            elif (
+                                mb.state == "flying"
+                                and mb.type_index == 3
+                                and mb.split_available
+                            ):
+                                split_bird(game_state)
+                            elif (
+                                mb.state == "flying"
+                                and mb.type_index == 4
+                                and mb.boomerang_available
+                            ):
+                                activate_boomerang(game_state)
+
             elif event.type == pygame.MOUSEBUTTONUP:
                 if event.button == 1:
                     game_state["campaign_is_dragging_tile"] = False
@@ -731,15 +674,9 @@ def main():
                             dy = my - start_my
                             end_r, end_c = start_r, start_c
                             if abs(dx) > abs(dy):
-                                if dx > 0:
-                                    end_c += 1
-                                else:
-                                    end_c -= 1
+                                end_c += 1 if dx > 0 else -1
                             else:
-                                if dy > 0:
-                                    end_r += 1
-                                else:
-                                    end_r -= 1
+                                end_r += 1 if dy > 0 else -1
                             start_swap_animation(
                                 game_state, (start_r, start_c), (end_r, end_c)
                             )
@@ -755,48 +692,24 @@ def main():
                             "is_dragging_brightness": False,
                         }
                     )
-                    if game_state["is_dragging"]:
-                        game_state["is_dragging"] = False
-                        dx = game_state["sling_x"] - game_state["projectile_x"]
-                        dy = game_state["sling_y"] - game_state["projectile_y"]
-                        angle = math.atan2(dy, dx)
-                        max_drag_dist = int(150 * game_state["scale_factor"])
-                        distance = min(math.hypot(dx, dy), max_drag_dist)
-                        power = distance / 7.0
-                        game_state["velocity_x"] = power * math.cos(angle)
-                        game_state["velocity_y"] = power * math.sin(angle)
-                        game_state["is_moving"] = True
+
+                    if mb and mb.state == "dragging":
+                        mb.launch(
+                            game_state["sling_x"],
+                            game_state["sling_y"],
+                            game_state["scale_factor"],
+                        )
                         game_state["show_rope"] = False
                         game_state["current_shot_hit"] = False
                         game_state["last_shot_path"] = []
                         if game_state["sound_on"]:
                             game_state["sounds"]["fly_sound"].play()
-                        if (
-                            game_state["current_bird_img"]
-                            == game_state["images"]["bird_imgs"][2]
-                        ):
-                            game_state["boost_available"] = True
-                        elif (
-                            game_state["current_bird_img"]
-                            == game_state["images"]["bird_imgs"][3]
-                        ):
-                            game_state["split_available"] = True
-                        elif (
-                            game_state["current_bird_img"]
-                            == game_state["images"]["bird_imgs"][4]
-                        ):
-                            game_state["boomerang_available"] = True
 
-        if game_state["is_dragging"] and not is_gameplay_paused:
-            bird_radius = game_state["object_size"] // 2
-            game_state["projectile_x"] = max(
-                bird_radius, min(mx, game_state["WIDTH"] - bird_radius)
-            )
-            game_state["projectile_y"] = max(
-                bird_radius, min(my, game_state["HEIGHT"] - bird_radius)
-            )
+        # Обновление мыши (Дрэг птицы)
+        if mb and mb.state == "dragging" and not is_gameplay_paused:
+            mb.drag_to(mx, my, game_state["WIDTH"], game_state["HEIGHT"])
 
-        # --- ИСПРАВЛЕНИЕ ОШИБКИ 1: Убрана проверка 'not is_gameplay_paused'
+        # Кампания: Анимации обмена
         if game_state["campaign_is_swapping"]:
             anim = game_state["campaign_swap_anim"]
             anim["progress"] += 0.15
@@ -816,7 +729,6 @@ def main():
                     game_state["campaign_is_swapping"] = False
                     game_state["campaign_swap_anim"] = None
 
-        # --- ИСПРАВЛЕНИЕ ОШИБКИ 2: Убрана проверка 'not is_gameplay_paused'
         if (
             game_state["game_mode"] == "campaign"
             and game_state["campaign_is_processing"]
@@ -826,6 +738,7 @@ def main():
         game_state = update_game_state(game_state)
         texts = game_state["texts"]
 
+        # ==================== Отрисовка UI и Меню ====================
         if game_state.get("show_campaign_hint_popup"):
             popup_elements = draw_campaign_hint_popup(
                 game_state["screen"], game_state["fonts"], game_state, mx, my, texts
@@ -1018,14 +931,18 @@ def main():
                         elements["lang_ru_btn"].collidepoint(mx, my)
                         and game_state["language"] != "ru"
                     ):
-                        game_state["language"] = "ru"
-                        game_state["texts"] = LANGUAGES["ru"]
+                        game_state["language"], game_state["texts"] = (
+                            "ru",
+                            LANGUAGES["ru"],
+                        )
                     elif (
                         elements["lang_en_btn"].collidepoint(mx, my)
                         and game_state["language"] != "en"
                     ):
-                        game_state["language"] = "en"
-                        game_state["texts"] = LANGUAGES["en"]
+                        game_state["language"], game_state["texts"] = (
+                            "en",
+                            LANGUAGES["en"],
+                        )
                     elif elements["back_btn"].collidepoint(mx, my):
                         game_state.update({"language_menu": False, "settings": True})
 
@@ -1049,16 +966,16 @@ def main():
                     ].collidepoint(mx, my):
                         game_state["is_dragging_sfx_volume"] = True
                     elif elements["prev_track_btn"].collidepoint(mx, my):
-                        num_tracks = len(game_state["sounds"]["music_playlist"])
                         new_index = (
-                            game_state["current_music_track_index"] - 1 + num_tracks
-                        ) % num_tracks
+                            game_state["current_music_track_index"]
+                            - 1
+                            + len(game_state["sounds"]["music_playlist"])
+                        ) % len(game_state["sounds"]["music_playlist"])
                         play_music_track(game_state, new_index)
                     elif elements["next_track_btn"].collidepoint(mx, my):
-                        num_tracks = len(game_state["sounds"]["music_playlist"])
-                        new_index = (
-                            game_state["current_music_track_index"] + 1
-                        ) % num_tracks
+                        new_index = (game_state["current_music_track_index"] + 1) % len(
+                            game_state["sounds"]["music_playlist"]
+                        )
                         play_music_track(game_state, new_index)
                     elif elements["back_btn"].collidepoint(mx, my):
                         game_state.update(
@@ -1066,13 +983,15 @@ def main():
                         )
                 if game_state["is_dragging_music_volume"]:
                     slider = elements["music_slider"]
-                    new_volume = (mx - slider.x) / slider.width
-                    game_state["music_volume"] = max(0.0, min(1.0, new_volume))
+                    game_state["music_volume"] = max(
+                        0.0, min(1.0, (mx - slider.x) / slider.width)
+                    )
                     update_all_volumes(game_state)
                 if game_state["is_dragging_sfx_volume"]:
                     slider = elements["sfx_slider"]
-                    new_volume = (mx - slider.x) / slider.width
-                    game_state["sfx_volume"] = max(0.0, min(1.0, new_volume))
+                    game_state["sfx_volume"] = max(
+                        0.0, min(1.0, (mx - slider.x) / slider.width)
+                    )
                     update_all_volumes(game_state)
 
             elif game_state["screen_settings_menu"]:
@@ -1099,8 +1018,9 @@ def main():
                         )
                 if game_state["is_dragging_brightness"]:
                     slider = elements["brightness_slider"]
-                    new_pos = (mx - slider.x) / slider.width
-                    game_state["brightness_slider_pos"] = max(0.0, min(1.0, new_pos))
+                    game_state["brightness_slider_pos"] = max(
+                        0.0, min(1.0, (mx - slider.x) / slider.width)
+                    )
 
             elif game_state["game_mode_menu"]:
                 elements = draw_game_mode_selection(
@@ -1170,7 +1090,7 @@ def main():
                                 if rect.collidepoint(mx, my):
                                     game_state["achievements_viewing_difficulty"] = diff
                                     break
-                if game_state["show_achievements_reset_confirm"]:
+                elif game_state["show_achievements_reset_confirm"]:
                     confirm_elements = draw_achievements_reset_confirmation(
                         game_state["screen"],
                         game_state["fonts"],
@@ -1229,6 +1149,7 @@ def main():
                         }
                     )
 
+        # ==================== Отрисовка Геймплея и Логика ====================
         else:
             if game_state["game_mode"] == "campaign":
                 campaign_buttons = draw_campaign_board(
@@ -1248,31 +1169,359 @@ def main():
                         game_state["campaign_level_complete"] = False
 
             elif not game_state["training_complete"]:
-                if game_state["bird_is_jumping"] and not is_gameplay_paused:
-                    game_state["jump_progress"] += 0.05
-                    progress = min(1.0, game_state["jump_progress"])
-                    start_x, start_y = game_state["jump_start_pos"]
-                    end_x, end_y = game_state["sling_x"], game_state["sling_y"]
-                    current_x = start_x + (end_x - start_x) * progress
-                    parabola_offset = (
-                        150 * game_state["scale_factor"] * math.sin(progress * math.pi)
-                    )
-                    current_y = start_y + (end_y - start_y) * progress - parabola_offset
-                    if game_state["jump_bird_img"]:
-                        game_state["screen"].blit(
-                            game_state["jump_bird_img"],
-                            (
-                                current_x - game_state["object_size"] // 2,
-                                current_y - game_state["object_size"] // 2,
-                            ),
+
+                # --- ОБНОВЛЕНИЕ ООП ЛОГИКИ ---
+                if not is_gameplay_paused and not game_state["game_over"]:
+
+                    if mb and mb.state == "jumping":
+                        event = mb.update(
+                            game_state["gravity"],
+                            game_state["GROUND_LEVEL"],
+                            game_state["WIDTH"],
+                            game_state["HEIGHT"],
                         )
-                    if game_state["jump_progress"] >= 1.0:
-                        game_state["bird_is_jumping"] = False
-                        game_state["current_bird_img"] = game_state["jump_bird_img"]
-                        game_state["jump_bird_img"] = None
-                        game_state["projectile_x"] = game_state["sling_x"]
-                        game_state["projectile_y"] = game_state["sling_y"]
-                        game_state["jump_progress"] = 0
+
+                    elif mb and mb.state in ["flying", "tumbling"]:
+                        # Оставляем след
+                        if (
+                            len(game_state["last_shot_path"]) == 0
+                            or math.hypot(
+                                game_state["last_shot_path"][-1][0] - mb.x,
+                                game_state["last_shot_path"][-1][1] - mb.y,
+                            )
+                            > 20
+                        ):
+                            game_state["last_shot_path"].append((mb.x, mb.y))
+                        if random.random() < 0.5:
+                            create_trail_particle(
+                                game_state["trail_particles"], mb.x, mb.y
+                            )
+
+                        event = mb.update(
+                            game_state["gravity"],
+                            game_state["GROUND_LEVEL"],
+                            game_state["WIDTH"],
+                            game_state["HEIGHT"],
+                        )
+
+                        if event == "hit_ground":
+                            create_dust_particle(
+                                game_state["dust_particles"],
+                                mb.x,
+                                game_state["GROUND_LEVEL"],
+                                count=20,
+                            )
+
+                    # Обновление других групп спрайтов
+                    game_state["targets"].update(
+                        game_state["WIDTH"], game_state["HEIGHT"]
+                    )
+                    game_state["obstacles"].update(
+                        game_state["WIDTH"], game_state["HEIGHT"]
+                    )
+
+                    for sb in game_state["small_birds"]:
+                        sb_event = sb.update(
+                            game_state["gravity"], game_state["GROUND_LEVEL"]
+                        )
+                        if sb_event == "hit_ground":
+                            create_dust_particle(
+                                game_state["dust_particles"],
+                                sb.x,
+                                game_state["GROUND_LEVEL"],
+                                count=10,
+                            )
+
+                    for dp in game_state["defeated_pigs"]:
+                        dp_event = dp.update(
+                            game_state["gravity"], game_state["GROUND_LEVEL"]
+                        )
+                        if dp_event == "hit_ground":
+                            create_dust_particle(
+                                game_state["dust_particles"],
+                                dp.x,
+                                dp.y + dp.size // 2,
+                                count=30,
+                            )
+
+                    # --- КОЛЛИЗИИ ООП ---
+                    if mb and mb.state in ["flying", "tumbling"]:
+                        hit_targets = pygame.sprite.spritecollide(
+                            mb, game_state["targets"], False
+                        )
+                        for target in hit_targets:
+                            game_state["current_shot_hit"] = True
+                            if mb.type_index == 1:
+                                explosion_center = target.rect.center
+                                game_state["screen_shake"] = 15
+                                if game_state["sound_on"]:
+                                    game_state["sounds"]["explosion_sound"].play()
+                                game_state["explosion_center"] = explosion_center
+                                game_state["explosion_active"] = True
+                                game_state["explosion_frames"] = game_state[
+                                    "MAX_EXPLOSION_FRAMES"
+                                ]
+
+                                targets_to_remove = [
+                                    t
+                                    for t in game_state["targets"]
+                                    if math.hypot(
+                                        t.rect.centerx - explosion_center[0],
+                                        t.rect.centery - explosion_center[1],
+                                    )
+                                    <= game_state["EXPLOSION_RADIUS"]
+                                ]
+                                for t in targets_to_remove:
+                                    game_state["defeated_pigs"].add(
+                                        DefeatedPig(
+                                            t.rect.centerx,
+                                            t.rect.centery,
+                                            random.uniform(-2, 0),
+                                            game_state["object_size"],
+                                        )
+                                    )
+                                    t.kill()
+
+                                num_destroyed = len(targets_to_remove)
+                                if num_destroyed > 0:
+                                    game_state["score"] += num_destroyed
+                                    game_state["combo"] += num_destroyed
+                                    update_max_combo(
+                                        game_state, game_state["current_profile"]
+                                    )
+                                mb.state = "dead"
+                                break
+                            else:
+                                create_feather_explosion(
+                                    game_state["feather_particles"],
+                                    target.rect.centerx,
+                                    target.rect.centery,
+                                    mb.type_index,
+                                )
+                                game_state["score"] += 1
+                                game_state["combo"] += 1
+                                update_max_combo(
+                                    game_state, game_state["current_profile"]
+                                )
+                                if game_state["sound_on"]:
+                                    game_state["sounds"]["hit_sound"].play()
+
+                                game_state["defeated_pigs"].add(
+                                    DefeatedPig(
+                                        target.rect.centerx,
+                                        target.rect.centery,
+                                        -abs(mb.vy * 0.2),
+                                        game_state["object_size"],
+                                    )
+                                )
+                                target.kill()
+                                mb.state = "dead"
+                                break
+
+                        if game_state["game_mode"] == "obstacle" and mb.state in [
+                            "flying",
+                            "tumbling",
+                        ]:
+                            hit_obstacles = pygame.sprite.spritecollide(
+                                mb, game_state["obstacles"], False
+                            )
+                            for obs in hit_obstacles:
+                                create_brick_shatter(
+                                    game_state["dust_particles"],
+                                    obs.rect.centerx,
+                                    obs.rect.centery,
+                                )
+                                obs.kill()
+                                mb.vx *= 0.5
+                                mb.vy *= 0.5
+                                if game_state["sound_on"]:
+                                    game_state["sounds"]["brick_sound"].play()
+                                break
+
+                    # Коллизии мелких птиц
+                    for sb in game_state["small_birds"]:
+                        if sb.state in ["flying", "tumbling"]:
+                            hit_targets = pygame.sprite.spritecollide(
+                                sb, game_state["targets"], False
+                            )
+                            for target in hit_targets:
+                                create_feather_explosion(
+                                    game_state["feather_particles"],
+                                    target.rect.centerx,
+                                    target.rect.centery,
+                                    3,
+                                )
+                                game_state["current_shot_hit"] = True
+                                game_state["score"] += 1
+                                game_state["combo"] += 1
+                                update_max_combo(
+                                    game_state, game_state["current_profile"]
+                                )
+                                game_state["defeated_pigs"].add(
+                                    DefeatedPig(
+                                        target.rect.centerx,
+                                        target.rect.centery,
+                                        0,
+                                        game_state["object_size"],
+                                    )
+                                )
+                                target.kill()
+                                sb.state = "dead"
+                                sb.kill()
+                                break
+
+                            if (
+                                game_state["game_mode"] == "obstacle"
+                                and sb.state != "dead"
+                            ):
+                                hit_obstacles = pygame.sprite.spritecollide(
+                                    sb, game_state["obstacles"], False
+                                )
+                                for obs in hit_obstacles:
+                                    create_brick_shatter(
+                                        game_state["dust_particles"],
+                                        obs.rect.centerx,
+                                        obs.rect.centery,
+                                    )
+                                    obs.kill()
+                                    sb.vx *= 0.5
+                                    sb.vy *= 0.5
+                                    if game_state["sound_on"]:
+                                        game_state["sounds"]["brick_sound"].play()
+                                    break
+
+                    # Очистка мертвых свиней и спавн новых целей
+                    dead_pigs = [
+                        dp
+                        for dp in game_state["defeated_pigs"]
+                        if dp.timer <= 0 and dp.on_ground
+                    ]
+                    for dp in dead_pigs:
+                        dp.kill()
+                        if game_state["game_mode"] not in [
+                            "training",
+                            "developer",
+                            "campaign",
+                        ]:
+                            if game_state["game_mode"] != "sharpshooter":
+                                while True:
+                                    new_rect = create_target(
+                                        game_state["WIDTH"],
+                                        game_state["HEIGHT"],
+                                        game_state["object_size"],
+                                    )
+                                    collide = any(
+                                        new_rect.inflate(10, 10).colliderect(t.rect)
+                                        for t in game_state["targets"]
+                                    ) or any(
+                                        new_rect.inflate(10, 10).colliderect(o.rect)
+                                        for o in game_state["obstacles"]
+                                    )
+                                    if not collide:
+                                        sm = SPEED_MULTIPLIER.get(
+                                            game_state["difficulty"], 0
+                                        )
+                                        dx, dy = 0, 0
+                                        if sm > 0:
+                                            dx = (
+                                                random.uniform(0.5, 2.0)
+                                                * sm
+                                                * random.choice([-1, 1])
+                                            )
+                                            dy = (
+                                                random.uniform(0.5, 2.0)
+                                                * sm
+                                                * random.choice([-1, 1])
+                                            )
+                                        game_state["targets"].add(
+                                            Target(new_rect, dx, dy)
+                                        )
+                                        break
+                            else:
+                                sm = SPEED_MULTIPLIER.get(game_state["difficulty"], 0)
+                                dx, dy = 0, 0
+                                if sm > 0:
+                                    dx = (
+                                        random.uniform(0.5, 2.0)
+                                        * sm
+                                        * random.choice([-1, 1])
+                                    )
+                                    dy = (
+                                        random.uniform(0.5, 2.0)
+                                        * sm
+                                        * random.choice([-1, 1])
+                                    )
+                                game_state["targets"].add(
+                                    Target(
+                                        create_target(
+                                            game_state["WIDTH"],
+                                            game_state["HEIGHT"],
+                                            game_state["object_size"],
+                                        ),
+                                        dx,
+                                        dy,
+                                    )
+                                )
+                                game_state["target_timer_start"] = time.time()
+
+                    # Переход к следующей птице
+                    if (
+                        mb
+                        and mb.state in ["stopped", "out_of_bounds", "dead"]
+                        and len(game_state["small_birds"]) == 0
+                    ):
+                        if mb.state in ["stopped", "out_of_bounds"]:
+                            if not game_state["current_shot_hit"] and game_state[
+                                "game_mode"
+                            ] not in ["developer", "training", "campaign"]:
+                                game_state["lives"] -= 1
+                                game_state["combo"] = 0
+                            mb.state = "dead"
+                        get_next_bird(game_state)
+
+                    # Sharpshooter таймер
+                    if (
+                        game_state["game_mode"] == "sharpshooter"
+                        and len(game_state["targets"]) > 0
+                    ):
+                        time_left = max(
+                            0,
+                            game_state["target_duration"]
+                            - (time.time() - game_state["target_timer_start"]),
+                        )
+                        if time_left <= 0:
+                            for t in game_state["targets"]:
+                                t.kill()
+                            game_state["lives"] -= 1
+                            game_state["combo"] = 0
+                            if game_state["lives"] > 0:
+                                sm = SPEED_MULTIPLIER.get(game_state["difficulty"], 0)
+                                dx, dy = 0, 0
+                                if sm > 0:
+                                    dx = (
+                                        random.uniform(0.5, 2.0)
+                                        * sm
+                                        * random.choice([-1, 1])
+                                    )
+                                    dy = (
+                                        random.uniform(0.5, 2.0)
+                                        * sm
+                                        * random.choice([-1, 1])
+                                    )
+                                game_state["targets"].add(
+                                    Target(
+                                        create_target(
+                                            game_state["WIDTH"],
+                                            game_state["HEIGHT"],
+                                            game_state["object_size"],
+                                        ),
+                                        dx,
+                                        dy,
+                                    )
+                                )
+                                game_state["target_timer_start"] = time.time()
+                            else:
+                                game_state["game_over"] = True
 
                 draw_gameplay(
                     game_state["screen"],
@@ -1282,523 +1531,6 @@ def main():
                     texts,
                 )
 
-                for pig in game_state["defeated_pigs"][:]:
-                    if not pig["on_ground"]:
-                        pig["vy"] += game_state["gravity"]
-                        pig["y"] += pig["vy"]
-                        if (
-                            pig["y"]
-                            >= game_state["GROUND_LEVEL"]
-                            - game_state["object_size"] // 2
-                        ):
-                            pig["y"] = (
-                                game_state["GROUND_LEVEL"]
-                                - game_state["object_size"] // 2
-                            )
-                            pig["on_ground"] = True
-                            pig["timer"] = 15
-                            create_dust_particle(
-                                game_state["dust_particles"],
-                                pig["x"],
-                                pig["y"] + game_state["object_size"] // 2,
-                                count=30,
-                            )
-                    if pig["on_ground"]:
-                        pig["timer"] -= 1
-                        if pig["timer"] <= 0:
-                            game_state["defeated_pigs"].remove(pig)
-                            if game_state["game_mode"] not in [
-                                "training",
-                                "developer",
-                                "campaign",
-                            ]:
-                                existing_objects = (
-                                    game_state["targets"] + game_state["obstacles"]
-                                )
-                                if game_state["game_mode"] != "sharpshooter":
-                                    while True:
-                                        new_target = create_target(
-                                            game_state["WIDTH"],
-                                            game_state["HEIGHT"],
-                                            game_state["object_size"],
-                                        )
-                                        if not any(
-                                            new_target.inflate(10, 10).colliderect(obj)
-                                            for obj in existing_objects
-                                        ):
-                                            game_state["targets"].append(new_target)
-                                            add_new_speed(game_state)
-                                            break
-                                else:
-                                    game_state["targets"].append(
-                                        create_target(
-                                            game_state["WIDTH"],
-                                            game_state["HEIGHT"],
-                                            game_state["object_size"],
-                                        )
-                                    )
-                                    add_new_speed(game_state)
-                                    game_state["target_timer_start"] = time.time()
-                    pig_rect = pygame.Rect(
-                        pig["x"] - game_state["object_size"] // 2,
-                        pig["y"] - game_state["object_size"] // 2,
-                        game_state["object_size"],
-                        game_state["object_size"],
-                    )
-                    game_state["screen"].blit(
-                        game_state["images"]["target_defeated_img"], pig_rect
-                    )
-
-                if game_state["is_tumbling"]:
-                    if not is_gameplay_paused:
-                        game_state["tumble_timer"] -= 1
-                        game_state["projectile_x"] += game_state["velocity_x"]
-                        game_state["projectile_angle"] += game_state["angular_velocity"]
-                        game_state["projectile_rect"].centerx = int(
-                            game_state["projectile_x"]
-                        )
-                        game_state["velocity_x"] *= 0.95
-                        game_state["angular_velocity"] *= 0.99
-                        if abs(game_state["velocity_x"]) < 0.1:
-                            game_state["velocity_x"] = 0
-                        if (
-                            game_state["tumble_timer"] <= 0
-                            or game_state["velocity_x"] == 0
-                        ):
-                            game_state["is_tumbling"] = False
-                            if not game_state["current_shot_hit"] and game_state[
-                                "game_mode"
-                            ] not in ["developer", "training", "campaign"]:
-                                game_state["lives"] -= 1
-                                game_state["combo"] = 0
-                            get_next_bird(game_state)
-
-                elif (
-                    game_state["is_moving"]
-                    and not game_state["game_over"]
-                    and not is_gameplay_paused
-                ):
-                    if game_state["small_birds"]:
-                        game_state["is_moving"] = False
-                    game_state["projectile_x"] += game_state["velocity_x"]
-                    game_state["projectile_y"] += game_state["velocity_y"]
-                    game_state["velocity_y"] += game_state["gravity"]
-                    game_state["projectile_rect"].center = (
-                        int(game_state["projectile_x"]),
-                        int(game_state["projectile_y"]),
-                    )
-                    if (
-                        game_state["current_bird_img"]
-                        == game_state["images"]["bird_imgs"][4]
-                    ):
-                        game_state["projectile_angle"] -= 15
-                    game_state["last_shot_path"].append(
-                        (game_state["projectile_x"], game_state["projectile_y"])
-                    )
-                    if random.random() < 0.5:
-                        create_trail_particle(
-                            game_state["trail_particles"],
-                            game_state["projectile_x"],
-                            game_state["projectile_y"],
-                        )
-
-                    if (
-                        game_state["projectile_y"]
-                        >= game_state["GROUND_LEVEL"] - game_state["object_size"] // 2
-                        and not game_state["small_birds"]
-                    ):
-                        game_state["is_moving"] = False
-                        game_state["is_tumbling"] = True
-                        game_state["tumble_timer"] = 25
-                        game_state["projectile_y"] = (
-                            game_state["GROUND_LEVEL"] - game_state["object_size"] // 2
-                        )
-                        game_state["velocity_y"] = 0
-                        game_state["angular_velocity"] = game_state["velocity_x"] * -1.5
-                        create_dust_particle(
-                            game_state["dust_particles"],
-                            game_state["projectile_x"],
-                            game_state["GROUND_LEVEL"],
-                            count=20,
-                        )
-
-                    elif (
-                        game_state["projectile_y"] > game_state["HEIGHT"] + 50
-                        or game_state["projectile_x"] < -50
-                        or game_state["projectile_x"] > game_state["WIDTH"] + 50
-                    ) and not game_state["small_birds"]:
-                        if not game_state["current_shot_hit"] and game_state[
-                            "game_mode"
-                        ] not in ["developer", "training", "campaign"]:
-                            game_state["lives"] -= 1
-                            game_state["combo"] = 0
-                        get_next_bird(game_state)
-
-                    for i, target in reversed(list(enumerate(game_state["targets"]))):
-                        if game_state["projectile_rect"].colliderect(target):
-                            try:
-                                bird_index = game_state["images"]["bird_imgs"].index(
-                                    game_state["current_bird_img"]
-                                )
-                            except (ValueError, TypeError):
-                                bird_index = 0
-                            if bird_index == 1:
-                                game_state["current_shot_hit"] = True
-                                explosion_center = target.center
-                                game_state["screen_shake"] = 15
-                                if game_state["sound_on"]:
-                                    game_state["sounds"]["explosion_sound"].play()
-                                game_state["explosion_center"] = explosion_center
-                                game_state["explosion_active"] = True
-                                game_state["explosion_frames"] = game_state[
-                                    "MAX_EXPLOSION_FRAMES"
-                                ]
-                                targets_to_remove = [
-                                    t
-                                    for t in game_state["targets"]
-                                    if math.hypot(
-                                        t.centerx - explosion_center[0],
-                                        t.centery - explosion_center[1],
-                                    )
-                                    <= game_state["EXPLOSION_RADIUS"]
-                                ]
-                                num_destroyed = 0
-                                for t_to_remove in targets_to_remove:
-                                    try:
-                                        idx = game_state["targets"].index(t_to_remove)
-                                        pig_to_defeat = game_state["targets"].pop(idx)
-                                        game_state["defeated_pigs"].append(
-                                            {
-                                                "x": pig_to_defeat.centerx,
-                                                "y": pig_to_defeat.centery,
-                                                "vy": random.uniform(-2, 0),
-                                                "on_ground": False,
-                                                "timer": -1,
-                                            }
-                                        )
-                                        if game_state["target_speeds"]:
-                                            game_state["target_speeds"].pop(idx)
-                                        num_destroyed += 1
-                                    except (ValueError, IndexError):
-                                        continue
-                                if num_destroyed > 0:
-                                    game_state["score"] += num_destroyed
-                                    game_state["combo"] += num_destroyed
-                                    update_max_combo(
-                                        game_state, game_state["current_profile"]
-                                    )
-                                get_next_bird(game_state)
-                                break
-                            else:
-                                create_feather_explosion(
-                                    game_state["feather_particles"],
-                                    target.centerx,
-                                    target.centery,
-                                    bird_index,
-                                )
-                                game_state["current_shot_hit"] = True
-                                game_state["score"] += 1
-                                game_state["combo"] += 1
-                                update_max_combo(
-                                    game_state, game_state["current_profile"]
-                                )
-                                if game_state["sound_on"]:
-                                    game_state["sounds"]["hit_sound"].play()
-                                pig_to_defeat = game_state["targets"].pop(i)
-                                game_state["defeated_pigs"].append(
-                                    {
-                                        "x": pig_to_defeat.centerx,
-                                        "y": pig_to_defeat.centery,
-                                        "vy": -abs(game_state["velocity_y"] * 0.2),
-                                        "on_ground": False,
-                                        "timer": -1,
-                                    }
-                                )
-                                if game_state["target_speeds"]:
-                                    game_state["target_speeds"].pop(i)
-                                get_next_bird(game_state)
-                                break
-
-                    if game_state["game_mode"] == "obstacle":
-                        for i, obstacle in reversed(
-                            list(enumerate(game_state["obstacles"]))
-                        ):
-                            if game_state["projectile_rect"].colliderect(obstacle):
-                                create_brick_shatter(
-                                    game_state["dust_particles"],
-                                    obstacle.centerx,
-                                    obstacle.centery,
-                                )
-                                game_state["obstacles"].pop(i)
-                                game_state["obstacle_speeds"].pop(i)
-                                game_state["velocity_x"] *= 0.5
-                                game_state["velocity_y"] *= 0.5
-                                if game_state["sound_on"]:
-                                    game_state["sounds"]["brick_sound"].play()
-                                break
-
-                is_any_small_bird_active = False
-                for bird in game_state["small_birds"]:
-                    if bird["active"]:
-                        is_any_small_bird_active = True
-                        if bird.get("is_tumbling"):
-                            if not is_gameplay_paused:
-                                bird["tumble_timer"] -= 1
-                                bird["x"] += bird["vx"]
-                                bird["angle"] += bird["angular_velocity"]
-                                bird["rect"].centerx = int(bird["x"])
-                                bird["vx"] *= 0.95
-                                bird["angular_velocity"] *= 0.99
-                                if abs(bird["vx"]) < 0.1:
-                                    bird["vx"] = 0
-                                if bird["tumble_timer"] <= 0 or bird["vx"] == 0:
-                                    bird["active"] = False
-                        elif not is_gameplay_paused:
-                            bird["x"] += bird["vx"]
-                            bird["y"] += bird["vy"]
-                            bird["vy"] += game_state["gravity"]
-                            bird["rect"].center = (bird["x"], bird["y"])
-                            if (
-                                bird["y"]
-                                >= game_state["GROUND_LEVEL"]
-                                - game_state["small_object_size"] // 2
-                            ):
-                                bird["is_tumbling"] = True
-                                bird["tumble_timer"] = 60
-                                bird["y"] = (
-                                    game_state["GROUND_LEVEL"]
-                                    - game_state["small_object_size"] // 2
-                                )
-                                bird["vy"] = 0
-                                bird["angular_velocity"] = bird["vx"] * -1.5
-                                create_dust_particle(
-                                    game_state["dust_particles"],
-                                    bird["x"],
-                                    game_state["GROUND_LEVEL"],
-                                    count=10,
-                                )
-                            if game_state["game_mode"] == "obstacle":
-                                for i, obstacle in reversed(
-                                    list(enumerate(game_state["obstacles"]))
-                                ):
-                                    if bird["rect"].colliderect(obstacle):
-                                        create_brick_shatter(
-                                            game_state["dust_particles"],
-                                            obstacle.centerx,
-                                            obstacle.centery,
-                                        )
-                                        bird["vx"] *= 0.5
-                                        bird["vy"] *= 0.5
-                                        game_state["obstacles"].pop(i)
-                                        game_state["obstacle_speeds"].pop(i)
-                                        if game_state["sound_on"]:
-                                            game_state["sounds"]["brick_sound"].play()
-                                        break
-                            for i, target in reversed(
-                                list(enumerate(game_state["targets"]))
-                            ):
-                                if bird["rect"].colliderect(target):
-                                    create_feather_explosion(
-                                        game_state["feather_particles"],
-                                        target.centerx,
-                                        target.centery,
-                                        3,
-                                    )
-                                    if not game_state["current_shot_hit"]:
-                                        game_state["current_shot_hit"] = True
-                                    game_state["score"] += 1
-                                    game_state["combo"] += 1
-                                    update_max_combo(
-                                        game_state, game_state["current_profile"]
-                                    )
-                                    pig_to_defeat = game_state["targets"].pop(i)
-                                    game_state["defeated_pigs"].append(
-                                        {
-                                            "x": pig_to_defeat.centerx,
-                                            "y": pig_to_defeat.centery,
-                                            "vy": 0,
-                                            "on_ground": False,
-                                            "timer": -1,
-                                        }
-                                    )
-                                    if game_state["target_speeds"]:
-                                        game_state["target_speeds"].pop(i)
-                                    bird["active"] = False
-                                    break
-
-                if (
-                    not is_any_small_bird_active
-                    and game_state["small_birds"]
-                    and not game_state["is_moving"]
-                    and not game_state["is_tumbling"]
-                ):
-                    if not game_state["current_shot_hit"] and game_state[
-                        "game_mode"
-                    ] not in ["developer", "training", "campaign"]:
-                        game_state["lives"] -= 1
-                        game_state["combo"] = 0
-                    game_state["small_birds"] = []
-                    get_next_bird(game_state)
-
-                if not game_state["bird_is_jumping"]:
-                    if (
-                        game_state["is_moving"] or game_state["is_tumbling"]
-                    ) and game_state["current_bird_img"]:
-                        if (
-                            game_state["current_bird_img"]
-                            == game_state["images"]["bird_imgs"][4]
-                            or game_state["is_tumbling"]
-                        ):
-                            rotated_bird = pygame.transform.rotate(
-                                game_state["current_bird_img"],
-                                game_state["projectile_angle"],
-                            )
-                            new_rect = rotated_bird.get_rect(
-                                center=game_state["projectile_rect"].center
-                            )
-                            game_state["screen"].blit(rotated_bird, new_rect)
-                        else:
-                            game_state["screen"].blit(
-                                game_state["current_bird_img"],
-                                game_state["projectile_rect"],
-                            )
-                    elif (
-                        not game_state["is_moving"]
-                        and not game_state["is_tumbling"]
-                        and game_state["current_bird_img"]
-                    ):
-                        game_state["screen"].blit(
-                            game_state["current_bird_img"],
-                            (
-                                game_state["projectile_x"]
-                                - game_state["object_size"] // 2,
-                                game_state["projectile_y"]
-                                - game_state["object_size"] // 2,
-                            ),
-                        )
-
-                for bird in game_state["small_birds"]:
-                    if bird["active"]:
-                        rotated_bird = pygame.transform.rotate(
-                            game_state["images"]["small_bird_img"], bird["angle"]
-                        )
-                        new_rect = rotated_bird.get_rect(center=bird["rect"].center)
-                        game_state["screen"].blit(rotated_bird, new_rect)
-
-                for i, target in enumerate(game_state["targets"]):
-                    game_state["screen"].blit(
-                        game_state["images"]["target_img"], target
-                    )
-                    if (
-                        not is_gameplay_paused
-                        and game_state["game_mode"] != "sharpshooter"
-                        and len(game_state["target_speeds"]) > i
-                    ):
-                        target.x += game_state["target_speeds"][i][0]
-                        target.y += game_state["target_speeds"][i][1]
-                        if not (0 < target.left and target.right < game_state["WIDTH"]):
-                            game_state["target_speeds"][i] = (
-                                -game_state["target_speeds"][i][0],
-                                game_state["target_speeds"][i][1],
-                            )
-                        if not (
-                            0 < target.top and target.bottom < game_state["HEIGHT"]
-                        ):
-                            game_state["target_speeds"][i] = (
-                                game_state["target_speeds"][i][0],
-                                -game_state["target_speeds"][i][1],
-                            )
-                if game_state["game_mode"] == "obstacle":
-                    for i, obstacle in enumerate(game_state["obstacles"]):
-                        game_state["screen"].blit(
-                            game_state["images"]["brick_img"], obstacle
-                        )
-
-                texts = game_state["texts"]
-                if game_state["game_mode"] != "sharpshooter":
-                    score_surf, _ = draw_text(
-                        f"{texts['score_colon']} {game_state['score']}",
-                        game_state["fonts"]["small_font"],
-                        (0, 0, 0),
-                    )
-                    game_state["screen"].blit(score_surf, (10, 10))
-                    lives_text = (
-                        texts["lives_infinite"]
-                        if game_state["lives"] == float("inf")
-                        else f"{texts['lives_colon']} {game_state['lives']}"
-                    )
-                    lives_surf, _ = draw_text(
-                        lives_text, game_state["fonts"]["small_font"], (0, 0, 0)
-                    )
-                    game_state["screen"].blit(lives_surf, (10, 50))
-                    combo_surf, _ = draw_text(
-                        f"{texts['combo_colon']} {game_state['combo']}",
-                        game_state["fonts"]["small_font"],
-                        (0, 0, 0),
-                    )
-                    game_state["screen"].blit(combo_surf, (10, 90))
-                else:
-                    if (
-                        not is_gameplay_paused
-                        and not game_state["game_over"]
-                        and len(game_state["targets"]) > 0
-                    ):
-                        time_left = max(
-                            0,
-                            game_state["target_duration"]
-                            - (time.time() - game_state["target_timer_start"]),
-                        )
-                        if time_left <= 0:
-                            game_state["targets"].pop(0)
-                            if game_state["target_speeds"]:
-                                game_state["target_speeds"].pop(0)
-                            game_state["lives"] -= 1
-                            game_state["combo"] = 0
-                            if game_state["lives"] > 0:
-                                game_state["targets"].append(
-                                    create_target(
-                                        game_state["WIDTH"],
-                                        game_state["HEIGHT"],
-                                        game_state["object_size"],
-                                    )
-                                )
-                                add_new_speed(game_state)
-                                game_state["target_timer_start"] = time.time()
-                            else:
-                                game_state["game_over"] = True
-                    else:
-                        time_left = 0
-
-                    timer_surf, _ = draw_text(
-                        f"{texts['time_colon']} {time_left:.1f}s",
-                        game_state["fonts"]["small_font"],
-                        (255, 0, 0),
-                    )
-                    game_state["screen"].blit(timer_surf, (10, 10))
-                    score_surf, _ = draw_text(
-                        f"{texts['score_colon']} {game_state['score']}",
-                        game_state["fonts"]["small_font"],
-                        (0, 0, 0),
-                    )
-                    game_state["screen"].blit(score_surf, (10, 50))
-                    combo_surf, _ = draw_text(
-                        f"{texts['combo_colon']} {game_state['combo']}",
-                        game_state["fonts"]["small_font"],
-                        (0, 0, 0),
-                    )
-                    game_state["screen"].blit(combo_surf, (10, 90))
-                    lives_text = (
-                        texts["lives_infinite"]
-                        if game_state["lives"] == float("inf")
-                        else f"{texts['lives_colon']} {game_state['lives']}"
-                    )
-                    lives_surf, _ = draw_text(
-                        lives_text, game_state["fonts"]["small_font"], (0, 0, 0)
-                    )
-                    game_state["screen"].blit(lives_surf, (10, 130))
-
-                if game_state["lives"] <= 0:
-                    game_state["game_over"] = True
             elif game_state["training_complete"]:
                 confirm_elements = draw_training_complete_screen(
                     game_state["screen"], game_state["fonts"], game_state, mx, my, texts
@@ -1841,8 +1573,7 @@ def main():
             overlay = pygame.Surface(
                 (game_state["WIDTH"], game_state["HEIGHT"]), pygame.SRCALPHA
             )
-            alpha = int(255 * (1.0 - brightness))
-            overlay.fill((0, 0, 0, alpha))
+            overlay.fill((0, 0, 0, int(255 * (1.0 - brightness))))
             game_state["screen"].blit(overlay, (0, 0))
 
         if game_state["images"].get("cursor_img"):

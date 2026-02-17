@@ -13,6 +13,7 @@ from utils import (
     update_particles,
 )
 from settings import LIVES, SPEED_MULTIPLIER, TARGET_DURATION
+from entities import MainBird, Target, Obstacle, SmallBird
 
 CAMPAIGN_GRID_SIZE = 7
 SCORE_MAP = {3: 30, 4: 50, 5: 100, 6: 300, 7: 1000}
@@ -20,17 +21,14 @@ SQUARE_SCORE = 50
 
 
 def find_and_score_matches(board):
-    """Находит все совпадения, включая линии и квадраты, и подсчитывает очки."""
     total_score = 0
     all_matched_tiles = set()
 
-    # 1. Проверка на линии (горизонтальные и вертикальные)
     for r in range(CAMPAIGN_GRID_SIZE):
         for c in range(CAMPAIGN_GRID_SIZE):
             if (r, c) in all_matched_tiles:
                 continue
 
-            # Горизонтальные
             if c < CAMPAIGN_GRID_SIZE - 2 and board[r][c] is not None:
                 match_type = board[r][c]
                 line_len = 1
@@ -44,7 +42,6 @@ def find_and_score_matches(board):
                     for i in range(line_len):
                         all_matched_tiles.add((r, c + i))
 
-            # Вертикальные
             if r < CAMPAIGN_GRID_SIZE - 2 and board[r][c] is not None:
                 match_type = board[r][c]
                 line_len = 1
@@ -58,7 +55,6 @@ def find_and_score_matches(board):
                     for i in range(line_len):
                         all_matched_tiles.add((r + i, c))
 
-    # 2. Проверка на квадраты 2x2
     for r in range(CAMPAIGN_GRID_SIZE - 1):
         for c in range(CAMPAIGN_GRID_SIZE - 1):
             tile = board[r][c]
@@ -68,8 +64,6 @@ def find_and_score_matches(board):
                 and tile == board[r][c + 1]
                 and tile == board[r + 1][c + 1]
             ):
-
-                # Проверяем, не является ли этот квадрат частью уже найденной линии
                 square_tiles = {(r, c), (r + 1, c), (r, c + 1), (r + 1, c + 1)}
                 if not square_tiles.intersection(all_matched_tiles):
                     total_score += SQUARE_SCORE
@@ -79,8 +73,6 @@ def find_and_score_matches(board):
 
 
 def check_matches(board):
-    """Простая проверка наличия хотя бы одного совпадения (без подсчета очков)."""
-    # Проверка по горизонтали
     for r in range(CAMPAIGN_GRID_SIZE):
         for c in range(CAMPAIGN_GRID_SIZE - 2):
             if (
@@ -89,7 +81,6 @@ def check_matches(board):
             ):
                 return True
 
-    # Проверка по вертикали
     for c in range(CAMPAIGN_GRID_SIZE):
         for r in range(CAMPAIGN_GRID_SIZE - 2):
             if (
@@ -97,12 +88,10 @@ def check_matches(board):
                 and board[r][c] == board[r + 1][c] == board[r + 2][c]
             ):
                 return True
-
     return False
 
 
 def create_campaign_board(game_state):
-    """Создает доску для режима 'Прохождение' без начальных совпадений."""
     bird_types_count = len(game_state["images"]["bird_imgs"])
     while True:
         board = [
@@ -113,11 +102,7 @@ def create_campaign_board(game_state):
             return board
 
 
-# --- НОВАЯ АНИМИРОВАННАЯ ЛОГИКА ОБНОВЛЕНИЯ ДОСКИ ---
-
-
 def find_and_start_clearing_matches(game_state):
-    """Находит совпадения и готовит их к анимированному удалению."""
     board = game_state["campaign_board"]
     score, matches = find_and_score_matches(board)
 
@@ -127,32 +112,27 @@ def find_and_start_clearing_matches(game_state):
         return False
 
     game_state["campaign_score"] += score
-
     game_state["campaign_board_state"] = "clearing"
     game_state["campaign_matched_tiles"] = matches
     game_state["campaign_clear_progress"] = 0.0
 
     if game_state["campaign_score"] >= game_state["campaign_target_score"]:
         game_state["campaign_level_complete"] = True
-
     return True
 
 
 def process_tile_clearing(game_state):
-    """Анимирует удаление совпавших плиток."""
     game_state["campaign_clear_progress"] += 0.1
     if game_state["campaign_clear_progress"] >= 1.0:
         board = game_state["campaign_board"]
         for r, c in game_state["campaign_matched_tiles"]:
             board[r][c] = None
-
         game_state["campaign_matched_tiles"] = []
         game_state["campaign_board_state"] = "falling"
         prepare_falling_tiles(game_state)
 
 
 def prepare_falling_tiles(game_state):
-    """Определяет, какие плитки должны упасть и как далеко."""
     board = game_state["campaign_board"]
     game_state["campaign_falling_tiles"] = []
 
@@ -176,11 +156,7 @@ def prepare_falling_tiles(game_state):
 
 
 def process_tile_falling(game_state):
-    """Анимирует падение плиток."""
-    if (
-        not game_state.get("campaign_falling_tiles")
-        or len(game_state.get("campaign_falling_tiles")) == 0
-    ):
+    if not game_state.get("campaign_falling_tiles"):
         game_state["campaign_board_state"] = "refilling"
         prepare_refill_tiles(game_state)
         return
@@ -199,7 +175,6 @@ def process_tile_falling(game_state):
 
 
 def prepare_refill_tiles(game_state):
-    """Определяет, где должны появиться новые плитки."""
     board = game_state["campaign_board"]
     bird_types_count = len(game_state["images"]["bird_imgs"])
     game_state["campaign_refilling_tiles"] = []
@@ -222,11 +197,7 @@ def prepare_refill_tiles(game_state):
 
 
 def process_tile_refilling(game_state):
-    """Анимирует появление новых плиток сверху."""
-    if (
-        not game_state.get("campaign_refilling_tiles")
-        or len(game_state.get("campaign_refilling_tiles")) == 0
-    ):
+    if not game_state.get("campaign_refilling_tiles"):
         game_state["campaign_board_state"] = "idle"
         find_and_start_clearing_matches(game_state)
         return
@@ -247,9 +218,7 @@ def process_tile_refilling(game_state):
 
 
 def update_campaign_board(game_state):
-    """Обрабатывает один шаг цикла обновления доски в 'Прохождении'."""
     board_state = game_state.get("campaign_board_state", "idle")
-
     if board_state == "clearing":
         process_tile_clearing(game_state)
     elif board_state == "falling":
@@ -260,32 +229,17 @@ def update_campaign_board(game_state):
         find_and_start_clearing_matches(game_state)
 
 
-def split_bird(game_state, x, y, vx, vy):
+def split_bird(game_state):
+    bird = game_state["main_bird"]
     small_bird_size = game_state["small_object_size"]
+    
     for i in range(3):
         angle = math.radians(120 * i)
-        small_vx = vx + math.cos(angle) * 3
-        small_vy = vy + math.sin(angle) * 3
-        bird_rect = pygame.Rect(
-            x - small_bird_size // 2,
-            y - small_bird_size // 2,
-            small_bird_size,
-            small_bird_size,
-        )
-
-        game_state["small_birds"].append(
-            {
-                "x": x,
-                "y": y,
-                "vx": small_vx,
-                "vy": small_vy,
-                "rect": bird_rect,
-                "active": True,
-                "on_ground": False,
-                "angle": 0,
-                "is_tumbling": False,
-            }
-        )
+        small_vx = bird.vx + math.cos(angle) * 3
+        small_vy = bird.vy + math.sin(angle) * 3
+        
+        sb = SmallBird(bird.x, bird.y, small_vx, small_vy, small_bird_size)
+        game_state["small_birds"].add(sb)
 
     if game_state["sound_on"] and game_state["sounds"].get("split_sound"):
         try:
@@ -293,15 +247,15 @@ def split_bird(game_state, x, y, vx, vy):
         except:
             pass
 
-    game_state["split_available"] = False
-    game_state["is_moving"] = False
-    game_state["projectile_x"] = -100
+    bird.split_available = False
+    bird.state = "dead"
 
 
 def activate_boomerang(game_state):
-    game_state["velocity_x"] = -15
-    game_state["velocity_y"] = 0
-    game_state["boomerang_available"] = False
+    bird = game_state["main_bird"]
+    bird.vx = -15
+    bird.vy = 0
+    bird.boomerang_available = False
     if game_state["sound_on"] and game_state["sounds"].get("boomerang_sound"):
         try:
             game_state["sounds"]["boomerang_sound"].play()
@@ -316,7 +270,6 @@ def reset_game(game_state):
     game_state.update(profile_achievements)
 
     game_state["bird_queue"] = []
-
     num_targets = 0
     num_obstacles = 0
 
@@ -333,9 +286,7 @@ def reset_game(game_state):
         game_state["show_training_popup"] = True
         game_state["training_bird_index"] = 0
         game_state["training_shots_fired"] = 0
-        game_state["training_popup_text"] = game_state["texts"][
-            "training_descriptions"
-        ][0]
+        game_state["training_popup_text"] = game_state["texts"]["training_descriptions"][0]
         game_state["current_bird_img"] = None
         game_state["lives"] = float("inf")
         num_targets = 3
@@ -350,104 +301,95 @@ def reset_game(game_state):
         elif game_state["game_mode"] == "sharpshooter":
             game_state["lives"] = LIVES.get(game_state["difficulty"], 5)
             num_targets = 1
-            game_state["target_duration"] = TARGET_DURATION.get(
-                game_state["difficulty"], 2.5
-            )
+            game_state["target_duration"] = TARGET_DURATION.get(game_state["difficulty"], 2.5)
         elif game_state["game_mode"] == "obstacle":
             game_state["lives"] = LIVES.get(game_state["difficulty"], 5)
             num_targets = 3
             num_obstacles = 3
             game_state["target_duration"] = 5
-        else:  # classic
+        else:
             game_state["lives"] = LIVES.get(game_state["difficulty"], 5)
             num_targets = 3
             game_state["target_duration"] = 5
 
-    game_state["projectile_x"], game_state["projectile_y"] = (
-        game_state["sling_x"],
-        game_state["sling_y"],
-    )
+    # Создаем объекты ООП
     bird_size = game_state["object_size"]
-    game_state["projectile_rect"] = pygame.Rect(
-        game_state["projectile_x"] - bird_size // 2,
-        game_state["projectile_y"] - bird_size // 2,
-        bird_size,
-        bird_size,
-    )
+    game_state["main_bird"] = MainBird(game_state["sling_x"], game_state["sling_y"], bird_size)
+    
+    if game_state.get("current_bird_img"):
+        try:
+            t_idx = game_state["images"]["bird_imgs"].index(game_state["current_bird_img"])
+        except ValueError:
+            t_idx = 0
+        game_state["main_bird"].set_image(game_state["current_bird_img"], t_idx)
 
-    game_state["is_dragging"] = False
-    game_state["is_moving"] = False
-    game_state["show_rope"] = False
-    game_state["velocity_x"] = 0
-    game_state["velocity_y"] = 0
+    # Инициализируем группы спрайтов
+    game_state["targets"] = pygame.sprite.Group()
+    game_state["obstacles"] = pygame.sprite.Group()
+    game_state["small_birds"] = pygame.sprite.Group()
+    game_state["defeated_pigs"] = pygame.sprite.Group()
+
     game_state["score"] = 0
     game_state["game_over"] = False
     game_state["explosion_active"] = False
     game_state["explosion_frames"] = 0
-    game_state["third_bird_boosted"] = False
-    game_state["boost_trail_start_time"] = None
-    game_state["boost_available"] = False
-    game_state["split_available"] = False
-    game_state["boomerang_available"] = False
-    game_state["small_birds"] = []
     game_state["combo"] = 0
+    
+    # Частицы пока оставляем как списки для плавного перехода
     game_state["trail_particles"] = []
     game_state["dust_particles"] = []
     game_state["spark_particles"] = []
     game_state["feather_particles"] = []
-
     game_state["last_shot_path"] = []
     game_state["path_display_timer"] = 0
-
     game_state["target_timer_start"] = time.time()
 
     obj_size = game_state["object_size"]
-    game_state["targets"] = []
-    game_state["obstacles"] = []
+    speed_multiplier = SPEED_MULTIPLIER.get(game_state["difficulty"], 0)
 
-    all_level_objects = []
+    # Создание мишеней
     for _ in range(num_targets):
         while True:
-            new_target = create_target(
-                game_state["WIDTH"], game_state["HEIGHT"], obj_size
-            )
-            if not any(
-                new_target.inflate(10, 10).colliderect(obj) for obj in all_level_objects
-            ):
-                game_state["targets"].append(new_target)
-                all_level_objects.append(new_target)
+            new_rect = create_target(game_state["WIDTH"], game_state["HEIGHT"], obj_size)
+            collide = False
+            for t in game_state["targets"]:
+                if new_rect.inflate(10, 10).colliderect(t.rect):
+                    collide = True
+                    break
+            for o in game_state["obstacles"]:
+                if new_rect.inflate(10, 10).colliderect(o.rect):
+                    collide = True
+                    break
+                    
+            if not collide:
+                dx, dy = 0, 0
+                if speed_multiplier > 0:
+                    dx = random.uniform(0.5, 2.0) * speed_multiplier * random.choice([-1, 1])
+                    dy = random.uniform(0.5, 2.0) * speed_multiplier * random.choice([-1, 1])
+                game_state["targets"].add(Target(new_rect, dx, dy))
                 break
 
+    # Создание препятствий
     for _ in range(num_obstacles):
         while True:
-            new_obstacle = create_obstacle(
-                game_state["WIDTH"], game_state["HEIGHT"], obj_size
-            )
-            if not any(
-                new_obstacle.inflate(10, 10).colliderect(obj)
-                for obj in all_level_objects
-            ):
-                game_state["obstacles"].append(new_obstacle)
-                all_level_objects.append(new_obstacle)
+            new_rect = create_obstacle(game_state["WIDTH"], game_state["HEIGHT"], obj_size)
+            collide = False
+            for t in game_state["targets"]:
+                if new_rect.inflate(10, 10).colliderect(t.rect):
+                    collide = True
+                    break
+            for o in game_state["obstacles"]:
+                if new_rect.inflate(10, 10).colliderect(o.rect):
+                    collide = True
+                    break
+                    
+            if not collide:
+                dx, dy = 0, 0
+                if speed_multiplier > 0:
+                    dx = random.uniform(0.5, 2.0) * speed_multiplier * random.choice([-1, 1])
+                    dy = random.uniform(0.5, 2.0) * speed_multiplier * random.choice([-1, 1])
+                game_state["obstacles"].add(Obstacle(new_rect, dx, dy))
                 break
-
-    speed_multiplier = SPEED_MULTIPLIER.get(game_state["difficulty"], 0)
-    game_state["target_speeds"] = []
-    game_state["obstacle_speeds"] = []
-    for _ in game_state["targets"]:
-        if speed_multiplier > 0:
-            dx = random.uniform(0.5, 2.0) * speed_multiplier * random.choice([-1, 1])
-            dy = random.uniform(0.5, 2.0) * speed_multiplier * random.choice([-1, 1])
-            game_state["target_speeds"].append((dx, dy))
-        else:
-            game_state["target_speeds"].append((0, 0))
-    for _ in game_state["obstacles"]:
-        if speed_multiplier > 0:
-            dx = random.uniform(0.5, 2.0) * speed_multiplier * random.choice([-1, 1])
-            dy = random.uniform(0.5, 2.0) * speed_multiplier * random.choice([-1, 1])
-            game_state["obstacle_speeds"].append((dx, dy))
-        else:
-            game_state["obstacle_speeds"].append((0, 0))
 
     return game_state
 

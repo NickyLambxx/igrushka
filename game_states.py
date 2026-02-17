@@ -101,14 +101,12 @@ def draw_campaign_board(screen, images, fonts, game_state, mx, my, texts):
         r, c = game_state["campaign_drag_start_tile"]
         bird_type = board[r][c]
         if bird_type is not None:
-            # Отрисовка "призрака" на исходной позиции
             draw_animated_tile_at(
                 bird_type,
                 c * cell_size + cell_size / 2,
                 r * cell_size + cell_size / 2,
                 alpha=100,
             )
-            # Отрисовка перетаскиваемой птицы под курсором
             drag_x = mx - board_rect.x
             drag_y = my - board_rect.y
             draw_animated_tile_at(bird_type, drag_x, drag_y, alpha=200)
@@ -161,10 +159,12 @@ def draw_campaign_board(screen, images, fonts, game_state, mx, my, texts):
         screen.blit(images["speaker_on_img"], (game_state["WIDTH"] - 50, 10))
     else:
         screen.blit(images["speaker_off_img"], (game_state["WIDTH"] - 50, 10))
+
     if game_state["paused"]:
         screen.blit(images["resume_img"], (game_state["WIDTH"] - 100, 10))
     else:
         screen.blit(images["pause_img"], (game_state["WIDTH"] - 100, 10))
+
     screen.blit(
         images["lightbulb_img"],
         (
@@ -184,6 +184,7 @@ def draw_campaign_board(screen, images, fonts, game_state, mx, my, texts):
         )
         win_rect.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2 - 50)
         screen.blit(win_surf, win_rect)
+
         buttons = {}
         restart_surf, restart_btn = draw_text(
             get_text(texts, "training_restart"), fonts["small_font"], (255, 255, 255)
@@ -195,6 +196,7 @@ def draw_campaign_board(screen, images, fonts, game_state, mx, my, texts):
             )
         screen.blit(restart_surf, restart_btn)
         buttons["restart_btn"] = restart_btn
+
         exit_surf, exit_btn = draw_text(
             get_text(texts, "training_exit_to_menu"),
             fonts["small_font"],
@@ -235,15 +237,10 @@ def draw_level_selection(screen, fonts, game_state, mx, my, texts):
         row = i // cols
         x = start_x + col * spacing
         y = start_y + row * spacing
-
         level_rect = pygame.Rect(x - radius, y - radius, radius * 2, radius * 2)
-        color = (100, 150, 255)
-        if level_rect.collidepoint(mx, my):
-            color = (150, 200, 255)
-
+        color = (150, 200, 255) if level_rect.collidepoint(mx, my) else (100, 150, 255)
         pygame.draw.circle(screen, color, (x, y), radius)
         pygame.draw.circle(screen, (255, 255, 255), (x, y), radius, 3)
-
         level_text_surf, _ = draw_text(str(i + 1), fonts["small_font"], (255, 255, 255))
         level_text_rect = level_text_surf.get_rect(center=(x, y))
         screen.blit(level_text_surf, level_text_rect)
@@ -281,9 +278,8 @@ def draw_campaign_hint_popup(screen, fonts, game_state, mx, my, texts):
     title_rect.y = dialog_rect.y + 20
     screen.blit(title_surf, title_rect)
 
-    description_text = get_text(texts, "campaign_hint_text")
     font = fonts["pedia_font"]
-    words = description_text.split(" ")
+    words = get_text(texts, "campaign_hint_text").split(" ")
     line_spacing = font.get_linesize()
     max_width = dialog_rect.width - 40
     x, y = dialog_rect.left + 20, dialog_rect.y + 70
@@ -328,6 +324,7 @@ def draw_menu(screen, images, fonts, game_state, mx, my, texts):
         "settings",
         "achievements",
     ]
+
     hover_bird_size = int(40 * game_state["scale_factor"])
     bird_hover_images = [
         pygame.transform.scale(img, (hover_bird_size, hover_bird_size))
@@ -341,9 +338,8 @@ def draw_menu(screen, images, fonts, game_state, mx, my, texts):
         text_rect.topleft = (game_state["WIDTH"] // 2 - 100, y_pos)
         if text_rect.collidepoint(mx, my):
             text_surf, _ = draw_text(text, fonts["small_font"], (255, 200, 0))
-            bird_img = bird_hover_images[i]
             screen.blit(
-                bird_img,
+                bird_hover_images[i],
                 (
                     text_rect.left - (hover_bird_size + 15),
                     text_rect.centery - hover_bird_size // 2,
@@ -374,23 +370,30 @@ def draw_menu(screen, images, fonts, game_state, mx, my, texts):
     screen.blit(pedia_surf, pedia_btn)
     buttons["birdpedia_btn"] = pedia_btn
 
-    profile_text_surf, _ = draw_text(
-        f"{get_text(texts, 'profile_colon')} {game_state['current_profile']}",
-        fonts["info_font"],
-        (0, 0, 0),
+    screen.blit(
+        draw_text(
+            f"{get_text(texts, 'profile_colon')} {game_state['current_profile']}",
+            fonts["info_font"],
+            (0, 0, 0),
+        )[0],
+        (10, 10),
     )
-    screen.blit(profile_text_surf, (10, 10))
-
-    mode_map = get_text(texts, "mode_map")
-    mode_name = mode_map.get(game_state["game_mode"], "Unknown")
-    mode_text_str = f"{get_text(texts, 'mode_colon')} {mode_name}"
-    mode_text_surf, _ = draw_text(mode_text_str, fonts["info_font"], (0, 0, 0))
-    screen.blit(mode_text_surf, (10, 35))
-
-    diff_name = get_text(texts, game_state["difficulty"])
-    diff_text_str = f"{get_text(texts, 'difficulty_colon')} {diff_name}"
-    diff_text_surf, _ = draw_text(diff_text_str, fonts["info_font"], (0, 0, 0))
-    screen.blit(diff_text_surf, (10, 60))
+    screen.blit(
+        draw_text(
+            f"{get_text(texts, 'mode_colon')} {get_text(texts, 'mode_map').get(game_state['game_mode'], 'Unknown')}",
+            fonts["info_font"],
+            (0, 0, 0),
+        )[0],
+        (10, 35),
+    )
+    screen.blit(
+        draw_text(
+            f"{get_text(texts, 'difficulty_colon')} {get_text(texts, game_state['difficulty'])}",
+            fonts["info_font"],
+            (0, 0, 0),
+        )[0],
+        (10, 60),
+    )
 
     if game_state["sound_on"]:
         screen.blit(images["speaker_on_img"], (game_state["WIDTH"] - 50, 10))
@@ -423,16 +426,20 @@ def draw_profile_selection(screen, fonts, game_state, mx, my, texts):
             screen.blit(delete_surf, delete_rect)
             buttons["delete_btns"][name] = delete_rect
         y_pos += 40
+
     input_box_rect = pygame.Rect(150, y_pos + 30, 250, 40)
     color = (255, 200, 0) if game_state["profile_input_active"] else (200, 200, 200)
     pygame.draw.rect(screen, (255, 255, 255), input_box_rect)
     pygame.draw.rect(screen, color, input_box_rect, 2)
-    input_text = game_state["profile_input_text"]
-    if game_state["profile_input_active"] and time.time() % 1 > 0.5:
-        input_text += "|"
-    input_surf, _ = draw_text(input_text, fonts["small_font"], (0, 0, 0))
-    screen.blit(input_surf, (input_box_rect.x + 10, input_box_rect.y + 5))
+    input_text = game_state["profile_input_text"] + (
+        "|" if game_state["profile_input_active"] and time.time() % 1 > 0.5 else ""
+    )
+    screen.blit(
+        draw_text(input_text, fonts["small_font"], (0, 0, 0))[0],
+        (input_box_rect.x + 10, input_box_rect.y + 5),
+    )
     buttons["input_box"] = input_box_rect
+
     create_surf, create_btn = draw_text(
         get_text(texts, "create"), fonts["small_font"], (0, 0, 0)
     )
@@ -444,9 +451,10 @@ def draw_profile_selection(screen, fonts, game_state, mx, my, texts):
     screen.blit(create_surf, create_btn)
     buttons["create_btn"] = create_btn
 
-    is_initial_selection = game_state.get("initial_profile_selection", False)
     button_text = (
-        get_text(texts, "exit") if is_initial_selection else get_text(texts, "back")
+        get_text(texts, "exit")
+        if game_state.get("initial_profile_selection", False)
+        else get_text(texts, "back")
     )
     back_surf, back_btn = draw_text(button_text, fonts["small_font"], (0, 0, 0))
     back_btn.bottomleft = (20, game_state["HEIGHT"] - 20)
@@ -467,13 +475,16 @@ def draw_profile_delete_confirmation(screen, fonts, game_state, mx, my, texts):
     dialog_rect.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2)
     pygame.draw.rect(screen, (70, 50, 50), dialog_rect)
     pygame.draw.rect(screen, (220, 200, 200), dialog_rect, 3)
-    question_text = f"{get_text(texts, 'confirm_delete_profile')} '{game_state['profile_to_delete']}'?"
+
     question_surf, question_rect = draw_text(
-        question_text, fonts["small_font"], (255, 255, 255)
+        f"{get_text(texts, 'confirm_delete_profile')} '{game_state['profile_to_delete']}'?",
+        fonts["small_font"],
+        (255, 255, 255),
     )
     question_rect.centerx = dialog_rect.centerx
     question_rect.y = dialog_rect.y + 40
     screen.blit(question_surf, question_rect)
+
     yes_surf, yes_btn = draw_text(
         get_text(texts, "yes"), fonts["small_font"], (200, 80, 80)
     )
@@ -483,6 +494,7 @@ def draw_profile_delete_confirmation(screen, fonts, game_state, mx, my, texts):
             get_text(texts, "yes"), fonts["small_font"], (255, 120, 120)
         )
     screen.blit(yes_surf, yes_btn)
+
     no_surf, no_btn = draw_text(
         get_text(texts, "no"), fonts["small_font"], (80, 200, 80)
     )
@@ -512,6 +524,7 @@ def draw_settings(screen, images, fonts, game_state, mx, my, texts):
             text_surf, _ = draw_text(text, fonts["small_font"], (255, 200, 0))
         screen.blit(text_surf, text_btn)
         buttons[btn_key] = text_btn
+
     back_surf, back_btn = draw_text(
         get_text(texts, "back"), fonts["small_font"], (0, 0, 0)
     )
@@ -529,14 +542,12 @@ def draw_sound_settings(screen, images, fonts, game_state, mx, my, texts):
     buttons = {}
     start_y = 280
     y_step = 80
-    music_vol_surf, _ = draw_text(
-        get_text(texts, "music_volume"), fonts["small_font"], (0, 0, 0)
+    screen.blit(
+        draw_text(get_text(texts, "music_volume"), fonts["small_font"], (0, 0, 0))[0],
+        (game_state["WIDTH"] // 2 - 150, start_y),
     )
-    screen.blit(music_vol_surf, (game_state["WIDTH"] // 2 - 150, start_y))
     music_slider = pygame.Rect(game_state["WIDTH"] // 2 - 150, start_y + 40, 300, 10)
-    music_knob_radius = 10
     music_knob_x = music_slider.x + int(game_state["music_volume"] * music_slider.width)
-    music_knob_center = (music_knob_x, music_slider.centery)
     pygame.draw.rect(screen, (150, 150, 150), music_slider)
     pygame.draw.rect(
         screen,
@@ -548,33 +559,35 @@ def draw_sound_settings(screen, images, fonts, game_state, mx, my, texts):
             music_slider.height,
         ),
     )
-    pygame.draw.circle(screen, (0, 100, 0), music_knob_center, music_knob_radius)
+    pygame.draw.circle(screen, (0, 100, 0), (music_knob_x, music_slider.centery), 10)
     buttons["music_slider"] = music_slider
 
-    sfx_vol_surf, _ = draw_text(
-        get_text(texts, "sfx_volume"), fonts["small_font"], (0, 0, 0)
+    screen.blit(
+        draw_text(get_text(texts, "sfx_volume"), fonts["small_font"], (0, 0, 0))[0],
+        (game_state["WIDTH"] // 2 - 150, start_y + y_step),
     )
-    screen.blit(sfx_vol_surf, (game_state["WIDTH"] // 2 - 150, start_y + y_step))
     sfx_slider = pygame.Rect(
         game_state["WIDTH"] // 2 - 150, start_y + y_step + 40, 300, 10
     )
-    sfx_knob_radius = 10
     sfx_knob_x = sfx_slider.x + int(game_state["sfx_volume"] * sfx_slider.width)
-    sfx_knob_center = (sfx_knob_x, sfx_slider.centery)
     pygame.draw.rect(screen, (150, 150, 150), sfx_slider)
     pygame.draw.rect(
         screen,
         (0, 150, 0),
         (sfx_slider.x, sfx_slider.y, sfx_knob_x - sfx_slider.x, sfx_slider.height),
     )
-    pygame.draw.circle(screen, (0, 100, 0), sfx_knob_center, sfx_knob_radius)
+    pygame.draw.circle(screen, (0, 100, 0), (sfx_knob_x, sfx_slider.centery), 10)
     buttons["sfx_slider"] = sfx_slider
 
     track_y = start_y + y_step * 2
-    track_text = f"{get_text(texts, 'track_colon')} {game_state['current_music_track_index'] + 1}"
-    track_surf, _ = draw_text(track_text, fonts["small_font"], (0, 0, 0))
-    track_rect = track_surf.get_rect(center=(game_state["WIDTH"] // 2, track_y))
+    track_surf, track_rect = draw_text(
+        f"{get_text(texts, 'track_colon')} {game_state['current_music_track_index'] + 1}",
+        fonts["small_font"],
+        (0, 0, 0),
+    )
+    track_rect.center = (game_state["WIDTH"] // 2, track_y)
     screen.blit(track_surf, track_rect)
+
     prev_surf, prev_btn = draw_text(
         get_text(texts, "prev_track"), fonts["small_font"], (0, 0, 0)
     )
@@ -585,6 +598,7 @@ def draw_sound_settings(screen, images, fonts, game_state, mx, my, texts):
         )
     screen.blit(prev_surf, prev_btn)
     buttons["prev_track_btn"] = prev_btn
+
     next_surf, next_btn = draw_text(
         get_text(texts, "next_track"), fonts["small_font"], (0, 0, 0)
     )
@@ -606,35 +620,22 @@ def draw_sound_settings(screen, images, fonts, game_state, mx, my, texts):
         )
     screen.blit(back_surf, back_btn)
     buttons["back_btn"] = back_btn
-
-    if game_state["sound_on"]:
-        screen.blit(images["speaker_on_img"], (game_state["WIDTH"] - 50, 10))
-    else:
-        screen.blit(images["speaker_off_img"], (game_state["WIDTH"] - 50, 10))
-    if game_state["paused"]:
-        screen.blit(images["resume_img"], (game_state["WIDTH"] - 100, 10))
-    else:
-        screen.blit(images["pause_img"], (game_state["WIDTH"] - 100, 10))
     return buttons
 
 
 def draw_screen_settings(screen, fonts, game_state, mx, my, texts):
     buttons = {}
-    start_y = 300
-    y_step = 120
     slider_width = 300
     slider_x = game_state["WIDTH"] // 2 - slider_width // 2
 
-    bright_text_surf, _ = draw_text(
-        get_text(texts, "brightness"), fonts["small_font"], (0, 0, 0)
+    screen.blit(
+        draw_text(get_text(texts, "brightness"), fonts["small_font"], (0, 0, 0))[0],
+        (slider_x, 300),
     )
-    screen.blit(bright_text_surf, (slider_x, start_y))
-    brightness_slider = pygame.Rect(slider_x, start_y + 40, slider_width, 10)
-    knob_radius = 10
+    brightness_slider = pygame.Rect(slider_x, 340, slider_width, 10)
     knob_x = brightness_slider.x + int(
         game_state["brightness_slider_pos"] * brightness_slider.width
     )
-    knob_center = (knob_x, brightness_slider.centery)
     pygame.draw.rect(screen, (150, 150, 150), brightness_slider)
     pygame.draw.rect(
         screen,
@@ -646,37 +647,37 @@ def draw_screen_settings(screen, fonts, game_state, mx, my, texts):
             brightness_slider.height,
         ),
     )
-    pygame.draw.circle(screen, (200, 200, 50), knob_center, knob_radius)
+    pygame.draw.circle(screen, (200, 200, 50), (knob_x, brightness_slider.centery), 10)
     buttons["brightness_slider"] = brightness_slider
 
-    res_y = start_y + y_step
-    res_text_surf, _ = draw_text(
-        get_text(texts, "resolution"), fonts["small_font"], (0, 0, 0)
+    screen.blit(
+        draw_text(get_text(texts, "resolution"), fonts["small_font"], (0, 0, 0))[0],
+        (slider_x, 420),
     )
-    screen.blit(res_text_surf, (slider_x, res_y))
     res_800x600 = (800, 600)
-    is_800_selected = game_state["pending_screen_mode"] == res_800x600
-    color_800 = (0, 150, 0) if is_800_selected else (0, 0, 0)
-    res800_surf, res800_btn = draw_text("800 x 600", fonts["small_font"], color_800)
-    res800_btn.topleft = (slider_x, res_y + 40)
-    if not is_800_selected and res800_btn.collidepoint(mx, my):
+    is_800 = game_state["pending_screen_mode"] == res_800x600
+    res800_surf, res800_btn = draw_text(
+        "800 x 600", fonts["small_font"], (0, 150, 0) if is_800 else (0, 0, 0)
+    )
+    res800_btn.topleft = (slider_x, 460)
+    if not is_800 and res800_btn.collidepoint(mx, my):
         res800_surf, _ = draw_text("800 x 600", fonts["small_font"], (255, 200, 0))
     screen.blit(res800_surf, res800_btn)
     buttons["res_800_btn"] = res800_btn
 
-    res_fullscreen_val = "fullscreen"
-    is_fullscreen_selected = game_state["pending_screen_mode"] == res_fullscreen_val
-    color_fullscreen = (0, 150, 0) if is_fullscreen_selected else (0, 0, 0)
-    res_fullscreen_surf, res_fullscreen_btn = draw_text(
-        get_text(texts, "fullscreen"), fonts["small_font"], color_fullscreen
+    is_fs = game_state["pending_screen_mode"] == "fullscreen"
+    res_fs_surf, res_fs_btn = draw_text(
+        get_text(texts, "fullscreen"),
+        fonts["small_font"],
+        (0, 150, 0) if is_fs else (0, 0, 0),
     )
-    res_fullscreen_btn.topleft = (res800_btn.right + 40, res800_btn.top)
-    if not is_fullscreen_selected and res_fullscreen_btn.collidepoint(mx, my):
-        res_fullscreen_surf, _ = draw_text(
+    res_fs_btn.topleft = (res800_btn.right + 40, res800_btn.top)
+    if not is_fs and res_fs_btn.collidepoint(mx, my):
+        res_fs_surf, _ = draw_text(
             get_text(texts, "fullscreen"), fonts["small_font"], (255, 200, 0)
         )
-    screen.blit(res_fullscreen_surf, res_fullscreen_btn)
-    buttons["res_fullscreen_btn"] = res_fullscreen_btn
+    screen.blit(res_fs_surf, res_fs_btn)
+    buttons["res_fullscreen_btn"] = res_fs_btn
 
     back_surf, back_btn = draw_text(
         get_text(texts, "back"), fonts["small_font"], (0, 0, 0)
@@ -693,17 +694,22 @@ def draw_screen_settings(screen, fonts, game_state, mx, my, texts):
 
 def draw_language_selection(screen, fonts, game_state, mx, my, texts):
     buttons = {}
-
-    ru_color = (0, 150, 0) if game_state["language"] == "ru" else (0, 0, 0)
-    ru_surf, ru_btn = draw_text("Русский", fonts["small_font"], ru_color)
+    ru_surf, ru_btn = draw_text(
+        "Русский",
+        fonts["small_font"],
+        (0, 150, 0) if game_state["language"] == "ru" else (0, 0, 0),
+    )
     ru_btn.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2)
     if ru_btn.collidepoint(mx, my) and game_state["language"] != "ru":
         ru_surf, _ = draw_text("Русский", fonts["small_font"], (255, 200, 0))
     screen.blit(ru_surf, ru_btn)
     buttons["lang_ru_btn"] = ru_btn
 
-    en_color = (0, 150, 0) if game_state["language"] == "en" else (0, 0, 0)
-    en_surf, en_btn = draw_text("English", fonts["small_font"], en_color)
+    en_surf, en_btn = draw_text(
+        "English",
+        fonts["small_font"],
+        (0, 150, 0) if game_state["language"] == "en" else (0, 0, 0),
+    )
     en_btn.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2 + 60)
     if en_btn.collidepoint(mx, my) and game_state["language"] != "en":
         en_surf, _ = draw_text("English", fonts["small_font"], (255, 200, 0))
@@ -728,8 +734,6 @@ def draw_game_mode_selection(screen, images, fonts, game_state, mx, my, texts):
     y_step = 50
     start_y = 220
 
-    modes_with_difficulty = ["classic", "sharpshooter", "obstacle"]
-
     def draw_mode_button(text_key, y_pos, key, mode_name):
         text = get_text(texts, text_key)
         color = (0, 150, 0) if game_state["game_mode"] == mode_name else (0, 0, 0)
@@ -749,32 +753,33 @@ def draw_game_mode_selection(screen, images, fonts, game_state, mx, my, texts):
     draw_mode_button("training", start_y + y_step * 4, "training_btn", "training")
     draw_mode_button("dev_mode", start_y + y_step * 5, "developer_btn", "developer")
 
-    if game_state["game_mode"] in modes_with_difficulty:
+    if game_state["game_mode"] in ["classic", "sharpshooter", "obstacle"]:
         slider = pygame.Rect(400, 350, 300, 10)
         pygame.draw.rect(screen, (200, 200, 200), slider)
-        knob_radius = 10
-        if game_state["difficulty"] == "easy":
-            knob_pos = slider.x + knob_radius
-        elif game_state["difficulty"] == "medium":
-            knob_pos = slider.centerx
-        else:
-            knob_pos = slider.right - knob_radius
-        knob_center = (knob_pos, slider.centery)
-        pygame.draw.circle(screen, (255, 0, 0), knob_center, knob_radius)
+        knob_pos = (
+            slider.x + 10
+            if game_state["difficulty"] == "easy"
+            else (
+                slider.centerx
+                if game_state["difficulty"] == "medium"
+                else slider.right - 10
+            )
+        )
+        pygame.draw.circle(screen, (255, 0, 0), (knob_pos, slider.centery), 10)
 
-        easy_surf, _ = draw_text(
-            get_text(texts, "easy"), fonts["small_font"], (0, 0, 0)
+        screen.blit(
+            draw_text(get_text(texts, "easy"), fonts["small_font"], (0, 0, 0))[0],
+            (slider.x, slider.y + 15),
         )
-        screen.blit(easy_surf, (slider.x, slider.y + 15))
-        med_surf, _ = draw_text(
-            get_text(texts, "medium"), fonts["small_font"], (0, 0, 0)
-        )
+        med_surf = draw_text(get_text(texts, "medium"), fonts["small_font"], (0, 0, 0))[
+            0
+        ]
         screen.blit(
             med_surf, (slider.centerx - med_surf.get_width() // 2, slider.y + 15)
         )
-        hard_surf, _ = draw_text(
-            get_text(texts, "hard"), fonts["small_font"], (0, 0, 0)
-        )
+        hard_surf = draw_text(get_text(texts, "hard"), fonts["small_font"], (0, 0, 0))[
+            0
+        ]
         screen.blit(hard_surf, (slider.right - hard_surf.get_width(), slider.y + 15))
         buttons["difficulty_slider"] = slider
 
@@ -788,30 +793,22 @@ def draw_game_mode_selection(screen, images, fonts, game_state, mx, my, texts):
         )
     screen.blit(back_surf, back_btn)
     buttons["back_btn"] = back_btn
-
-    if game_state["sound_on"]:
-        screen.blit(images["speaker_on_img"], (game_state["WIDTH"] - 50, 10))
-    else:
-        screen.blit(images["speaker_off_img"], (game_state["WIDTH"] - 50, 10))
-    if game_state["paused"]:
-        screen.blit(images["resume_img"], (game_state["WIDTH"] - 100, 10))
-    else:
-        screen.blit(images["pause_img"], (game_state["WIDTH"] - 100, 10))
     return buttons
 
 
 def draw_achievements(screen, images, fonts, game_state, mx, my, texts):
     buttons = {"profile_btns": {}, "difficulty_btns": {}}
     y_offset = 120
-    profiles_title_surf, _ = draw_text(
-        get_text(texts, "profiles"), fonts["small_font"], (0, 0, 0)
+    screen.blit(
+        draw_text(get_text(texts, "profiles"), fonts["small_font"], (0, 0, 0))[0],
+        (50, 150 + y_offset),
     )
-    screen.blit(profiles_title_surf, (50, 150 + y_offset))
     y_pos = 200 + y_offset
     for name in game_state["all_profiles_data"].keys():
         is_viewing = name == game_state["achievements_viewing_profile"]
-        color = (0, 150, 0) if is_viewing else (0, 0, 0)
-        text_surf, text_rect = draw_text(name, fonts["small_font"], color)
+        text_surf, text_rect = draw_text(
+            name, fonts["small_font"], (0, 150, 0) if is_viewing else (0, 0, 0)
+        )
         text_rect.topleft = (50, y_pos)
         if not is_viewing and text_rect.collidepoint(mx, my):
             text_surf, _ = draw_text(name, fonts["small_font"], (255, 200, 0))
@@ -819,16 +816,18 @@ def draw_achievements(screen, images, fonts, game_state, mx, my, texts):
         buttons["profile_btns"][name] = text_rect
         y_pos += 40
 
-    viewed_profile_name = game_state["achievements_viewing_profile"]
-    viewed_profile_data = game_state["all_profiles_data"].get(viewed_profile_name, {})
-    stats_title_surf, _ = draw_text(
-        f"{get_text(texts, 'stats_for')} '{viewed_profile_name}':",
-        fonts["small_font"],
-        (0, 0, 0),
+    viewed_profile_data = game_state["all_profiles_data"].get(
+        game_state["achievements_viewing_profile"], {}
     )
-    screen.blit(stats_title_surf, (350, 150 + y_offset))
+    screen.blit(
+        draw_text(
+            f"{get_text(texts, 'stats_for')} '{game_state['achievements_viewing_profile']}':",
+            fonts["small_font"],
+            (0, 0, 0),
+        )[0],
+        (350, 150 + y_offset),
+    )
 
-    difficulty_y = 200 + y_offset
     difficulties = {
         "easy": get_text(texts, "easy"),
         "medium": get_text(texts, "medium"),
@@ -837,9 +836,10 @@ def draw_achievements(screen, images, fonts, game_state, mx, my, texts):
     current_x = 350
     for key, text in difficulties.items():
         is_selected = key == game_state["achievements_viewing_difficulty"]
-        color = (0, 150, 0) if is_selected else (0, 0, 0)
-        diff_surf, diff_rect = draw_text(text, fonts["info_font"], color)
-        diff_rect.topleft = (current_x, difficulty_y)
+        diff_surf, diff_rect = draw_text(
+            text, fonts["info_font"], (0, 150, 0) if is_selected else (0, 0, 0)
+        )
+        diff_rect.topleft = (current_x, 200 + y_offset)
         if not is_selected and diff_rect.collidepoint(mx, my):
             diff_surf, _ = draw_text(text, fonts["info_font"], (255, 200, 0))
         screen.blit(diff_surf, diff_rect)
@@ -847,25 +847,31 @@ def draw_achievements(screen, images, fonts, game_state, mx, my, texts):
         current_x += diff_rect.width + 20
 
     stats_font = fonts["pedia_font"]
-    viewed_difficulty = game_state["achievements_viewing_difficulty"]
-    key_classic = f"max_combo_classic_{viewed_difficulty}"
-    score_classic = viewed_profile_data.get(key_classic, 0)
-    classic_surf, _ = draw_text(
-        f"{get_text(texts, 'max_combo_classic')} {score_classic}", stats_font, (0, 0, 0)
+    diff = game_state["achievements_viewing_difficulty"]
+    screen.blit(
+        draw_text(
+            f"{get_text(texts, 'max_combo_classic')} {viewed_profile_data.get(f'max_combo_classic_{diff}', 0)}",
+            stats_font,
+            (0, 0, 0),
+        )[0],
+        (350, 270 + y_offset),
     )
-    screen.blit(classic_surf, (350, 270 + y_offset))
-    key_ss = f"max_combo_sharpshooter_{viewed_difficulty}"
-    score_ss = viewed_profile_data.get(key_ss, 0)
-    ss_surf, _ = draw_text(
-        f"{get_text(texts, 'max_combo_sharpshooter')} {score_ss}", stats_font, (0, 0, 0)
+    screen.blit(
+        draw_text(
+            f"{get_text(texts, 'max_combo_sharpshooter')} {viewed_profile_data.get(f'max_combo_sharpshooter_{diff}', 0)}",
+            stats_font,
+            (0, 0, 0),
+        )[0],
+        (350, 310 + y_offset),
     )
-    screen.blit(ss_surf, (350, 310 + y_offset))
-    key_obs = f"max_combo_obstacle_{viewed_difficulty}"
-    score_obs = viewed_profile_data.get(key_obs, 0)
-    obs_surf, _ = draw_text(
-        f"{get_text(texts, 'max_combo_obstacle')} {score_obs}", stats_font, (0, 0, 0)
+    screen.blit(
+        draw_text(
+            f"{get_text(texts, 'max_combo_obstacle')} {viewed_profile_data.get(f'max_combo_obstacle_{diff}', 0)}",
+            stats_font,
+            (0, 0, 0),
+        )[0],
+        (350, 350 + y_offset),
     )
-    screen.blit(obs_surf, (350, 350 + y_offset))
 
     reset_surf, reset_btn = draw_text(
         get_text(texts, "reset_profile"), fonts["small_font"], (180, 0, 0)
@@ -888,15 +894,6 @@ def draw_achievements(screen, images, fonts, game_state, mx, my, texts):
         )
     screen.blit(back_surf, back_btn)
     buttons["back_btn"] = back_btn
-
-    if game_state["sound_on"]:
-        screen.blit(images["speaker_on_img"], (game_state["WIDTH"] - 50, 10))
-    else:
-        screen.blit(images["speaker_off_img"], (game_state["WIDTH"] - 50, 10))
-    if game_state["paused"]:
-        screen.blit(images["resume_img"], (game_state["WIDTH"] - 100, 10))
-    else:
-        screen.blit(images["pause_img"], (game_state["WIDTH"] - 100, 10))
     return buttons
 
 
@@ -910,13 +907,16 @@ def draw_achievements_reset_confirmation(screen, fonts, game_state, mx, my, text
     dialog_rect.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2)
     pygame.draw.rect(screen, (50, 50, 70), dialog_rect)
     pygame.draw.rect(screen, (200, 200, 220), dialog_rect, 3)
-    question_text = f"{get_text(texts, 'confirm_reset_stats')} '{game_state['achievements_viewing_profile']}'?"
+
     question_surf, question_rect = draw_text(
-        question_text, fonts["small_font"], (255, 255, 255)
+        f"{get_text(texts, 'confirm_reset_stats')} '{game_state['achievements_viewing_profile']}'?",
+        fonts["small_font"],
+        (255, 255, 255),
     )
     question_rect.centerx = dialog_rect.centerx
     question_rect.y = dialog_rect.y + 40
     screen.blit(question_surf, question_rect)
+
     yes_surf, yes_btn = draw_text(
         get_text(texts, "yes"), fonts["small_font"], (200, 80, 80)
     )
@@ -926,6 +926,7 @@ def draw_achievements_reset_confirmation(screen, fonts, game_state, mx, my, text
             get_text(texts, "yes"), fonts["small_font"], (255, 120, 120)
         )
     screen.blit(yes_surf, yes_btn)
+
     no_surf, no_btn = draw_text(
         get_text(texts, "no"), fonts["small_font"], (80, 200, 80)
     )
@@ -943,21 +944,16 @@ def draw_birdpedia_menu(screen, fonts, game_state, mx, my, texts):
     pedia_items = get_text(texts, "pedia_items")
     num_items = len(pedia_items)
     items_per_column = (num_items + 1) // 2
-    col1_x = 150
-    col2_x = 450
-    start_y = 300
-    y_step = 40
     for i, item_text in enumerate(pedia_items):
-        if i < items_per_column:
-            x, y = col1_x, start_y + i * y_step
-        else:
-            x, y = col2_x, start_y + (i - items_per_column) * y_step
+        x = 150 if i < items_per_column else 450
+        y = 300 + (i if i < items_per_column else i - items_per_column) * 40
         text_surf, text_rect = draw_text(item_text, fonts["small_font"], (0, 0, 0))
         text_rect.topleft = (x, y)
         if text_rect.collidepoint(mx, my):
             text_surf, _ = draw_text(item_text, fonts["small_font"], (255, 200, 0))
         screen.blit(text_surf, text_rect)
         buttons[item_text] = text_rect
+
     back_surf, back_btn = draw_text(
         get_text(texts, "back"), fonts["small_font"], (0, 0, 0)
     )
@@ -974,38 +970,34 @@ def draw_birdpedia_menu(screen, fonts, game_state, mx, my, texts):
 def draw_birdpedia_detail_screen(screen, fonts, game_state, mx, my, texts):
     buttons = {}
     item_name = game_state.get("birdpedia_item_selected", "Описание")
-    start_y_pos = 280
     image_key = PEDIA_IMAGES.get(item_name)
     if image_key:
-        img_bg_rect = pygame.Rect(100, start_y_pos, 150, 150)
+        img_bg_rect = pygame.Rect(100, 280, 150, 150)
         pygame.draw.rect(screen, (20, 20, 20), img_bg_rect)
-        if isinstance(image_key, tuple):
-            item_img = game_state["images"][image_key[0]][image_key[1]]
-        else:
-            item_img = game_state["images"][image_key]
+        item_img = (
+            game_state["images"][image_key[0]][image_key[1]]
+            if isinstance(image_key, tuple)
+            else game_state["images"][image_key]
+        )
         scaled_img = pygame.transform.scale(item_img, (120, 120))
-        img_rect = scaled_img.get_rect(center=img_bg_rect.center)
-        screen.blit(scaled_img, img_rect)
-
-    pedia_descriptions = get_text(texts, "pedia_descriptions")
-    description_text = pedia_descriptions.get(
-        item_name, get_text(texts, "pedia_not_found")
-    )
+        screen.blit(scaled_img, scaled_img.get_rect(center=img_bg_rect.center))
 
     font = fonts["pedia_font"]
-    words = description_text.split(" ")
-    line_spacing = font.get_linesize()
-    max_width = 450
-    x, y = 300, start_y_pos
+    words = (
+        get_text(texts, "pedia_descriptions")
+        .get(item_name, get_text(texts, "pedia_not_found"))
+        .split(" ")
+    )
+    x, y = 300, 280
     space = font.size(" ")[0]
     for word in words:
         word_surface = font.render(word, True, (0, 0, 0))
-        word_width, word_height = word_surface.get_size()
-        if x + word_width >= 300 + max_width:
+        if x + word_surface.get_width() >= 300 + 450:
             x = 300
-            y += line_spacing
+            y += font.get_linesize()
         screen.blit(word_surface, (x, y))
-        x += word_width + space
+        x += word_surface.get_width() + space
+
     back_surf, back_btn = draw_text(
         get_text(texts, "back"), fonts["small_font"], (0, 0, 0)
     )
@@ -1030,42 +1022,38 @@ def draw_hint_popup(screen, fonts, game_state, mx, my, texts):
     dialog_rect.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2)
     pygame.draw.rect(screen, (60, 60, 80), dialog_rect)
     pygame.draw.rect(screen, (210, 210, 230), dialog_rect, 3)
-    current_bird_img = game_state.get("current_bird_img")
-    bird_name_ru = game_state.get("bird_image_to_name", {}).get(
-        current_bird_img, "Неизвестная птица"
-    )
 
+    bird_name_ru = game_state.get("bird_image_to_name", {}).get(
+        game_state.get("current_bird_img"), "Неизвестная птица"
+    )
     try:
-        bird_idx = list(game_state.get("bird_image_to_name", {}).values()).index(
-            bird_name_ru
-        )
-        bird_name = get_text(texts, "pedia_items")[bird_idx]
+        bird_name = get_text(texts, "pedia_items")[
+            list(game_state.get("bird_image_to_name", {}).values()).index(bird_name_ru)
+        ]
     except (ValueError, IndexError):
         bird_name = get_text(texts, "unknown_bird")
-
-    pedia_descriptions = get_text(texts, "pedia_descriptions")
-    description_text = pedia_descriptions.get(
-        bird_name, get_text(texts, "no_bird_on_slingshot")
-    )
 
     title_surf, title_rect = draw_text(bird_name, fonts["small_font"], (255, 215, 0))
     title_rect.centerx = dialog_rect.centerx
     title_rect.y = dialog_rect.y + 20
     screen.blit(title_surf, title_rect)
+
     font = fonts["pedia_font"]
-    words = description_text.split(" ")
-    line_spacing = font.get_linesize()
-    max_width = dialog_rect.width - 40
+    words = (
+        get_text(texts, "pedia_descriptions")
+        .get(bird_name, get_text(texts, "no_bird_on_slingshot"))
+        .split(" ")
+    )
     x, y = dialog_rect.left + 20, dialog_rect.y + 70
     space = font.size(" ")[0]
     for word in words:
         word_surface = font.render(word, True, (255, 255, 255))
-        word_width, word_height = word_surface.get_size()
-        if x + word_width >= dialog_rect.left + max_width:
+        if x + word_surface.get_width() >= dialog_rect.right - 20:
             x = dialog_rect.left + 20
-            y += line_spacing
+            y += font.get_linesize()
         screen.blit(word_surface, (x, y))
-        x += word_width + space
+        x += word_surface.get_width() + space
+
     close_surf, close_btn = draw_text(
         get_text(texts, "hint_popup_close"), fonts["small_font"], (255, 255, 255)
     )
@@ -1090,18 +1078,18 @@ def draw_training_popup(screen, fonts, game_state, mx, my, texts):
     dialog_rect.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2)
     pygame.draw.rect(screen, (50, 70, 50), dialog_rect)
     pygame.draw.rect(screen, (200, 220, 200), dialog_rect, 3)
+
     words = game_state.get("training_popup_text", "").split(" ")
-    line_spacing = fonts["small_font"].get_linesize()
     x, y = dialog_rect.left + 20, dialog_rect.top + 20
     space = fonts["small_font"].size(" ")[0]
     for word in words:
         word_surface = fonts["small_font"].render(word, True, (255, 255, 255))
-        word_width, word_height = word_surface.get_size()
-        if x + word_width >= dialog_rect.right - 20:
+        if x + word_surface.get_width() >= dialog_rect.right - 20:
             x = dialog_rect.left + 20
-            y += line_spacing
+            y += fonts["small_font"].get_linesize()
         screen.blit(word_surface, (x, y))
-        x += word_width + space
+        x += word_surface.get_width() + space
+
     continue_surf, continue_btn = draw_text(
         get_text(texts, "training_popup_continue"), fonts["small_font"], (255, 255, 255)
     )
@@ -1129,6 +1117,7 @@ def draw_training_complete_screen(screen, fonts, game_state, mx, my, texts):
     )
     title_rect.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2 - 50)
     screen.blit(title_surf, title_rect)
+
     restart_surf, restart_btn = draw_text(
         get_text(texts, "training_restart"), fonts["small_font"], (255, 255, 255)
     )
@@ -1139,6 +1128,7 @@ def draw_training_complete_screen(screen, fonts, game_state, mx, my, texts):
         )
     screen.blit(restart_surf, restart_btn)
     buttons["restart_btn"] = restart_btn
+
     exit_surf, exit_btn = draw_text(
         get_text(texts, "training_exit_to_menu"), fonts["small_font"], (255, 255, 255)
     )
@@ -1159,10 +1149,13 @@ def draw_gameplay(screen, images, fonts, game_state, texts):
     queue_gap = int(60 * scale)
     bird_size = game_state["object_size"]
 
+    # Отрисовка очереди птиц
     for i, bird_img in enumerate(game_state["bird_queue"]):
         screen.blit(
             bird_img, (queue_start_x + i * queue_gap, GROUND_LEVEL - bird_size * 0.9)
         )
+
+    # Отрисовка рогатки
     pygame.draw.circle(
         screen,
         (139, 69, 19),
@@ -1170,9 +1163,12 @@ def draw_gameplay(screen, images, fonts, game_state, texts):
         int(5 * scale),
     )
 
-    if game_state["is_dragging"] and not game_state["paused"]:
-        dx = game_state["sling_x"] - game_state["projectile_x"]
-        dy = game_state["sling_y"] - game_state["projectile_y"]
+    mb = game_state.get("main_bird")
+
+    # Индикатор силы натяжения
+    if mb and mb.state == "dragging" and not game_state.get("paused"):
+        dx = game_state["sling_x"] - mb.x
+        dy = game_state["sling_y"] - mb.y
         power_bar_width = int(150 * scale)
         power_bar_height = int(15 * scale)
         max_drag_dist = int(150 * scale)
@@ -1201,15 +1197,36 @@ def draw_gameplay(screen, images, fonts, game_state, texts):
             ),
         )
 
-    if game_state["show_rope"]:
+    # Веревка рогатки
+    if game_state.get("show_rope") and mb and mb.state == "dragging":
         pygame.draw.line(
             screen,
             (139, 69, 19),
             (game_state["sling_x"], game_state["sling_y"]),
-            (game_state["projectile_x"], game_state["projectile_y"]),
+            (int(mb.x), int(mb.y)),
             int(3 * scale),
         )
 
+    # Отрисовка объектов (ООП)
+    if mb:
+        if mb.state == "jumping" and mb.jump_image:
+            screen.blit(mb.jump_image, (mb.x - mb.size // 2, mb.y - mb.size // 2))
+        elif mb.state != "dead":
+            mb.draw(screen)
+
+    for target in game_state.get("targets", []):
+        screen.blit(images["target_img"], target.rect)
+
+    for obs in game_state.get("obstacles", []):
+        screen.blit(images["brick_img"], obs.rect)
+
+    for dp in game_state.get("defeated_pigs", []):
+        dp.draw(screen, images["target_defeated_img"])
+
+    for sb in game_state.get("small_birds", []):
+        sb.draw(screen, images["small_bird_img"])
+
+    # UI кнопки звука и паузы
     if game_state["sound_on"]:
         screen.blit(images["speaker_on_img"], (game_state["WIDTH"] - 50, 10))
     else:
@@ -1218,9 +1235,77 @@ def draw_gameplay(screen, images, fonts, game_state, texts):
         screen.blit(images["resume_img"], (game_state["WIDTH"] - 100, 10))
     else:
         screen.blit(images["pause_img"], (game_state["WIDTH"] - 100, 10))
+
+    # UI Очки и Статистика
     if game_state["game_over"]:
         go_surf, go_rect = draw_text(
             get_text(texts, "game_over"), fonts["font"], (255, 0, 0)
         )
         go_rect.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2)
         screen.blit(go_surf, go_rect)
+
+    if game_state["game_mode"] != "sharpshooter":
+        screen.blit(
+            draw_text(
+                f"{texts['score_colon']} {game_state['score']}",
+                fonts["small_font"],
+                (0, 0, 0),
+            )[0],
+            (10, 10),
+        )
+        lives_text = (
+            texts["lives_infinite"]
+            if game_state["lives"] == float("inf")
+            else f"{texts['lives_colon']} {game_state['lives']}"
+        )
+        screen.blit(draw_text(lives_text, fonts["small_font"], (0, 0, 0))[0], (10, 50))
+        screen.blit(
+            draw_text(
+                f"{texts['combo_colon']} {game_state['combo']}",
+                fonts["small_font"],
+                (0, 0, 0),
+            )[0],
+            (10, 90),
+        )
+    else:
+        time_left = 0
+        if (
+            not game_state.get("paused")
+            and not game_state["game_over"]
+            and len(game_state.get("targets", [])) > 0
+        ):
+            time_left = max(
+                0,
+                game_state["target_duration"]
+                - (time.time() - game_state["target_timer_start"]),
+            )
+        screen.blit(
+            draw_text(
+                f"{texts['time_colon']} {time_left:.1f}s",
+                fonts["small_font"],
+                (255, 0, 0),
+            )[0],
+            (10, 10),
+        )
+        screen.blit(
+            draw_text(
+                f"{texts['score_colon']} {game_state['score']}",
+                fonts["small_font"],
+                (0, 0, 0),
+            )[0],
+            (10, 50),
+        )
+        screen.blit(
+            draw_text(
+                f"{texts['combo_colon']} {game_state['combo']}",
+                fonts["small_font"],
+                (0, 0, 0),
+            )[0],
+            (10, 90),
+        )
+        lives_text = (
+            texts["lives_infinite"]
+            if game_state["lives"] == float("inf")
+            else f"{texts['lives_colon']} {game_state['lives']}"
+        )
+        screen.blit(draw_text(lives_text, fonts["small_font"], (0, 0, 0))[0], (10, 130))

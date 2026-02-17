@@ -1,7 +1,5 @@
 import pygame
 import math
-import json
-import os
 import random
 from localization import LANGUAGES
 
