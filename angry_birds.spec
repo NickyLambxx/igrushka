@@ -2,7 +2,7 @@
 
 
 a = Analysis(
-    ['angry_birds.py'],
+    ["angry_birds.py"],
     pathex=[],
     binaries=[],
     datas=[],
@@ -22,7 +22,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='angry_birds',
+    name="angry_birds",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
