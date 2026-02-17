@@ -41,6 +41,23 @@ class MainBird(pygame.sprite.Sprite):
         self.jump_start_pos = (0, 0)
         self.jump_image = None
 
+    # Динамическая связь физики и графики
+    @property
+    def x(self):
+        return self.body.position.x
+
+    @x.setter
+    def x(self, value):
+        self.body.position = (value, self.body.position.y)
+
+    @property
+    def y(self):
+        return self.body.position.y
+
+    @y.setter
+    def y(self, value):
+        self.body.position = (self.body.position.x, value)
+
     def kill(self):
         if hasattr(self, "shape") and self.shape in self.space.shapes:
             self.space.remove(self.body, self.shape)
@@ -80,26 +97,24 @@ class MainBird(pygame.sprite.Sprite):
                 self.original_image, math.degrees(-self.body.angle)
             )
             self.mask = pygame.mask.from_surface(self.image)
-            self.rect = self.image.get_rect(
-                center=(int(self.body.position.x), int(self.body.position.y))
-            )
+            self.rect = self.image.get_rect(center=(int(self.x), int(self.y)))
 
     def start_drag(self):
         self.state = "dragging"
 
     def drag_to(self, mx, my, max_x, max_y):
         bird_radius = self.size // 2
-        x = max(bird_radius, min(mx, max_x - bird_radius))
-        y = max(bird_radius, min(my, max_y - bird_radius))
-        self.body.position = (x, y)
+        nx = max(bird_radius, min(mx, max_x - bird_radius))
+        ny = max(bird_radius, min(my, max_y - bird_radius))
+        self.body.position = (nx, ny)
         self.update_rect()
 
     def launch(self, sling_x, sling_y, scale_factor):
         self.state = "flying"
         self.body.body_type = pymunk.Body.DYNAMIC
 
-        dx = sling_x - self.body.position.x
-        dy = sling_y - self.body.position.y
+        dx = sling_x - self.x
+        dy = sling_y - self.y
         angle = math.atan2(dy, dx)
         max_drag_dist = int(150 * scale_factor)
         distance = min(math.hypot(dx, dy), max_drag_dist)
@@ -124,18 +139,15 @@ class MainBird(pygame.sprite.Sprite):
             if self.type_index == 4 and self.state == "flying":
                 self.body.angular_velocity = -15.0
 
-            if (
-                self.state == "flying"
-                and self.body.position.y >= ground_level - self.size
-            ):
+            if self.state == "flying" and self.y >= ground_level - self.size:
                 self.state = "tumbling"
                 self.tumble_timer = 2.0
                 event = "hit_ground"
 
             elif (
-                self.body.position.y > screen_height + 50
-                or self.body.position.x < -50
-                or self.body.position.x > screen_width + 50
+                self.y > screen_height + 50
+                or self.x < -50
+                or self.x > screen_width + 50
             ):
                 self.state = "out_of_bounds"
                 event = "out_of_bounds"
@@ -151,10 +163,10 @@ class MainBird(pygame.sprite.Sprite):
             p = min(1.0, self.jump_progress)
             sx, sy = self.jump_start_pos
             ex, ey = self.start_x, self.start_y
-            x = sx + (ex - sx) * p
+            nx = sx + (ex - sx) * p
             parabola_offset = 150 * (self.size / 50.0) * math.sin(p * math.pi)
-            y = sy + (ey - sy) * p - parabola_offset
-            self.body.position = (x, y)
+            ny = sy + (ey - sy) * p - parabola_offset
+            self.body.position = (nx, ny)
             if self.jump_progress >= 1.0:
                 self.state = "idle"
                 self.set_image(self.jump_image, self.type_index)
@@ -164,8 +176,6 @@ class MainBird(pygame.sprite.Sprite):
                 event = "jump_complete"
 
         self.update_rect()
-        self.x = self.body.position.x
-        self.y = self.body.position.y
         return event
 
 
@@ -193,8 +203,13 @@ class Target(pygame.sprite.Sprite):
         self.shape.friction = 0.6
         self.space.add(self.body, self.shape)
 
-        self.x = self.body.position.x
-        self.y = self.body.position.y
+    @property
+    def x(self):
+        return self.body.position.x
+
+    @property
+    def y(self):
+        return self.body.position.y
 
     def kill(self):
         if self.shape in self.space.shapes:
@@ -206,11 +221,7 @@ class Target(pygame.sprite.Sprite):
             self.original_image, math.degrees(-self.body.angle)
         )
         self.mask = pygame.mask.from_surface(self.image)
-        self.rect = self.image.get_rect(
-            center=(int(self.body.position.x), int(self.body.position.y))
-        )
-        self.x = self.body.position.x
-        self.y = self.body.position.y
+        self.rect = self.image.get_rect(center=(int(self.x), int(self.y)))
 
 
 class Obstacle(pygame.sprite.Sprite):
@@ -236,8 +247,13 @@ class Obstacle(pygame.sprite.Sprite):
         self.shape.friction = 0.8
         self.space.add(self.body, self.shape)
 
-        self.x = self.body.position.x
-        self.y = self.body.position.y
+    @property
+    def x(self):
+        return self.body.position.x
+
+    @property
+    def y(self):
+        return self.body.position.y
 
     def kill(self):
         if self.shape in self.space.shapes:
@@ -249,11 +265,7 @@ class Obstacle(pygame.sprite.Sprite):
             self.original_image, math.degrees(-self.body.angle)
         )
         self.mask = pygame.mask.from_surface(self.image)
-        self.rect = self.image.get_rect(
-            center=(int(self.body.position.x), int(self.body.position.y))
-        )
-        self.x = self.body.position.x
-        self.y = self.body.position.y
+        self.rect = self.image.get_rect(center=(int(self.x), int(self.y)))
 
 
 class SmallBird(pygame.sprite.Sprite):
@@ -282,8 +294,14 @@ class SmallBird(pygame.sprite.Sprite):
 
         self.state = "flying"
         self.tumble_timer = 0
-        self.x = self.body.position.x
-        self.y = self.body.position.y
+
+    @property
+    def x(self):
+        return self.body.position.x
+
+    @property
+    def y(self):
+        return self.body.position.y
 
     def kill(self):
         if self.shape in self.space.shapes:
@@ -293,7 +311,7 @@ class SmallBird(pygame.sprite.Sprite):
     def update(self, dt, gravity, ground_level):
         event = None
         if self.state == "flying":
-            if self.body.position.y >= ground_level - self.size // 2:
+            if self.y >= ground_level - self.size // 2:
                 self.state = "tumbling"
                 self.tumble_timer = 1.0
                 event = "hit_ground"
@@ -307,11 +325,7 @@ class SmallBird(pygame.sprite.Sprite):
             self.original_image, math.degrees(-self.body.angle)
         )
         self.mask = pygame.mask.from_surface(self.image)
-        self.rect = self.image.get_rect(
-            center=(int(self.body.position.x), int(self.body.position.y))
-        )
-        self.x = self.body.position.x
-        self.y = self.body.position.y
+        self.rect = self.image.get_rect(center=(int(self.x), int(self.y)))
         return event
 
 
@@ -339,8 +353,14 @@ class DefeatedPig(pygame.sprite.Sprite):
 
         self.on_ground = False
         self.timer = -1
-        self.x = self.body.position.x
-        self.y = self.body.position.y
+
+    @property
+    def x(self):
+        return self.body.position.x
+
+    @property
+    def y(self):
+        return self.body.position.y
 
     def kill(self):
         if self.shape in self.space.shapes:
@@ -350,7 +370,7 @@ class DefeatedPig(pygame.sprite.Sprite):
     def update(self, dt, gravity, ground_level):
         event = None
         if not self.on_ground:
-            if self.body.position.y >= ground_level - self.size // 2:
+            if self.y >= ground_level - self.size // 2:
                 self.on_ground = True
                 self.timer = 1.0
                 event = "hit_ground"
@@ -360,7 +380,5 @@ class DefeatedPig(pygame.sprite.Sprite):
                 event = "dead"
                 self.kill()
 
-        self.rect.center = (int(self.body.position.x), int(self.body.position.y))
-        self.x = self.body.position.x
-        self.y = self.body.position.y
+        self.rect.center = (int(self.x), int(self.y))
         return event
