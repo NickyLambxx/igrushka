@@ -1,0 +1,21 @@
+{
+    "Guest": {
+        "max_combo_classic": 0,
+        "max_combo_sharpshooter": 0,
+        "max_combo_obstacle": 0
+    },
+    "\u041d\u0438\u043a\u0438\u0442\u0430": {
+        "max_combo_classic_easy": 17,
+        "max_combo_classic_medium": 0,
+        "max_combo_classic_hard": 8,
+        "max_combo_sharpshooter_easy": 2,
+        "max_combo_sharpshooter_medium": 0,
+        "max_combo_sharpshooter_hard": 0,
+        "max_combo_obstacle_easy": 31,
+        "max_combo_obstacle_medium": 0,
+        "max_combo_obstacle_hard": 2,
+        "max_combo_classic": 51,
+        "max_combo_sharpshooter": 0,
+        "max_combo_obstacle": 0
+    }
+}

@@ -1,0 +1,10 @@
+{
+    "audio": {
+        "music_volume": 0.18,
+        "sfx_volume": 0.5
+    },
+    "display": {
+        "brightness": 1.0
+    },
+    "language": "ru"
+}
