@@ -1,6 +1,8 @@
 import pygame
 import sys
 import random
+import time
+from utils import draw_text
 from settings import (
     load_images,
     load_sounds,
@@ -183,7 +185,6 @@ def init_game():
         "campaign_is_dragging_tile": False,
     }
 
-    # Инициализация State Machine
     state_manager = StateManager()
     state_manager.add_state("profile_menu", ProfileMenuState())
     state_manager.add_state("main_menu", MainMenuState())
@@ -211,10 +212,16 @@ def init_game():
 def main():
     game_state = init_game()
     sm = game_state["state_manager"]
+    clock = game_state["clock"]
 
     while sm.running:
+        # Вычисление Delta Time (секунды, прошедшие с прошлого кадра)
+        dt = clock.tick(60) / 1000.0
         mx, my = pygame.mouse.get_pos()
 
+        # ==========================================
+        # 1. CONTROLLER (ОБРАБОТКА ВВОДА И СОБЫТИЙ)
+        # ==========================================
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 sm.running = False
@@ -226,13 +233,18 @@ def main():
             else:
                 sm.current_state.handle_event(event, mx, my, game_state)
 
-        sm.current_state.update(game_state)
+        # ==========================================
+        # 2. MODEL (ОБНОВЛЕНИЕ ЛОГИКИ С УЧЕТОМ dt)
+        # ==========================================
+        sm.current_state.update(dt, mx, my, game_state)
 
-        # Затемнение экрана в зависимости от настроек
-        brightness = game_state["brightness_slider_pos"]
-
+        # ==========================================
+        # 3. VIEW (ОТРИСОВКА ВИЗУАЛА)
+        # ==========================================
         sm.current_state.draw(game_state["screen"], mx, my, game_state)
 
+        # Глобальная отрисовка затемнения (настройки экрана)
+        brightness = game_state["brightness_slider_pos"]
         if brightness < 1.0:
             overlay = pygame.Surface(
                 (game_state["WIDTH"], game_state["HEIGHT"]), pygame.SRCALPHA
@@ -240,11 +252,29 @@ def main():
             overlay.fill((0, 0, 0, int(255 * (1.0 - brightness))))
             game_state["screen"].blit(overlay, (0, 0))
 
+        # Глобальная отрисовка всплывающего достижения (поверх всего)
+        if (
+            game_state.get("achievement_text")
+            and time.time() < game_state["achievement_show_time"]
+        ):
+            ach_surface = pygame.Surface((game_state["WIDTH"], 100), pygame.SRCALPHA)
+            ach_surface.fill((0, 0, 0, 150))
+            game_state["screen"].blit(ach_surface, (0, game_state["HEIGHT"] // 2 - 50))
+            text_surf, text_rect = draw_text(
+                game_state["achievement_text"],
+                game_state["fonts"]["achievement_font"],
+                (255, 215, 0),
+            )
+            text_rect.center = (game_state["WIDTH"] // 2, game_state["HEIGHT"] // 2)
+            game_state["screen"].blit(text_surf, text_rect)
+        elif game_state.get("achievement_text"):
+            game_state["achievement_text"] = ""
+
+        # Курсор
         if game_state["images"].get("cursor_img"):
             game_state["screen"].blit(game_state["images"]["cursor_img"], (mx, my))
 
         pygame.display.flip()
-        game_state["clock"].tick(60)
 
     user_settings = {
         "audio": {

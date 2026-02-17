@@ -12,7 +12,8 @@ from utils import (
     draw_particles,
     draw_dashed_trajectory,
     create_feather_explosion,
-    update_and_draw_feathers,
+    update_feathers,
+    draw_feathers,
     create_brick_shatter,
     create_target,
 )
@@ -79,7 +80,7 @@ class State:
     def handle_event(self, event, mx, my, game_state):
         pass
 
-    def update(self, game_state):
+    def update(self, dt, mx, my, game_state):
         pass
 
     def draw(self, screen, mx, my, game_state):
@@ -142,7 +143,6 @@ class MainMenuState(State):
     def draw(self, screen, mx, my, game_state):
         bg = game_state["images"]["menu_background"]
         screen.blit(bg, bg.get_rect(center=screen.get_rect().center))
-
         self.buttons = {}
         y_step = 50
         start_y = game_state["HEIGHT"] // 2
@@ -251,9 +251,7 @@ class MainMenuState(State):
 
 class ProfileMenuState(State):
     def __init__(self):
-        self.buttons = {}
-        self.del_buttons = {}
-        self.conf_buttons = {}
+        self.buttons, self.del_buttons, self.conf_buttons = {}, {}, {}
 
     def handle_event(self, event, mx, my, game_state):
         if event.type == pygame.KEYDOWN:
@@ -272,7 +270,6 @@ class ProfileMenuState(State):
                 and not game_state["initial_profile_selection"]
             ):
                 game_state["state_manager"].change_state("main_menu", game_state)
-
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if game_state.get("show_profile_delete_confirm"):
                 if self.conf_buttons.get("yes_btn") and self.conf_buttons[
@@ -337,7 +334,6 @@ class ProfileMenuState(State):
         bg = game_state["images"]["menu_background"]
         screen.blit(bg, bg.get_rect(center=screen.get_rect().center))
         fonts, texts = game_state["fonts"], game_state["texts"]
-
         self.buttons = {"profiles": {}}
         self.del_buttons = {}
         y_pos = 280
@@ -349,7 +345,6 @@ class ProfileMenuState(State):
                 text_surf, _ = draw_text(name, fonts["small_font"], (255, 200, 0))
             screen.blit(text_surf, text_rect)
             self.buttons["profiles"][name] = text_rect
-
             if name != "Guest":
                 del_surf, del_rect = draw_text("X", fonts["small_font"], (180, 0, 0))
                 del_rect.left, del_rect.centery = (
@@ -419,7 +414,6 @@ class ProfileMenuState(State):
             )
             q_rect.centerx, q_rect.y = dr.centerx, dr.y + 40
             screen.blit(q_surf, q_rect)
-
             y_surf, y_btn = draw_text(
                 get_text(texts, "yes"), fonts["small_font"], (200, 80, 80)
             )
@@ -429,7 +423,6 @@ class ProfileMenuState(State):
                     get_text(texts, "yes"), fonts["small_font"], (255, 120, 120)
                 )
             screen.blit(y_surf, y_btn)
-
             n_surf, n_btn = draw_text(
                 get_text(texts, "no"), fonts["small_font"], (80, 200, 80)
             )
@@ -549,6 +542,7 @@ class SoundSettingsState(State):
             game_state["is_dragging_music_volume"] = False
             game_state["is_dragging_sfx_volume"] = False
 
+    def update(self, dt, mx, my, game_state):
         if game_state.get("is_dragging_music_volume"):
             game_state["music_volume"] = max(
                 0.0,
@@ -688,6 +682,7 @@ class ScreenSettingsState(State):
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             game_state["is_dragging_brightness"] = False
 
+    def update(self, dt, mx, my, game_state):
         if game_state.get("is_dragging_brightness"):
             game_state["brightness_slider_pos"] = max(
                 0.0,
@@ -842,6 +837,7 @@ class GameModeMenuState(State):
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             game_state["is_dragging_difficulty"] = False
 
+    def update(self, dt, mx, my, game_state):
         if game_state.get("is_dragging_difficulty"):
             slider = self.buttons["diff_slider"]
             rel = mx - slider.x
@@ -857,8 +853,7 @@ class GameModeMenuState(State):
         screen.blit(bg, bg.get_rect(center=screen.get_rect().center))
         fonts, texts = game_state["fonts"], game_state["texts"]
         self.buttons = {}
-        sy = 220
-        modes = [
+        sy, modes = 220, [
             "classic",
             "sharpshooter",
             "obstacle",
@@ -925,8 +920,7 @@ class GameModeMenuState(State):
 
 class AchievementsMenuState(State):
     def __init__(self):
-        self.buttons = {}
-        self.conf_buttons = {}
+        self.buttons, self.conf_buttons = {}, {}
 
     def handle_event(self, event, mx, my, game_state):
         if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
@@ -1000,12 +994,11 @@ class AchievementsMenuState(State):
             (350, 150 + yo),
         )
 
-        diffs = {
+        diffs, cx = {
             "easy": get_text(texts, "easy"),
             "medium": get_text(texts, "medium"),
             "hard": get_text(texts, "hard"),
-        }
-        cx = 350
+        }, 350
         for k, txt in diffs.items():
             iss = k == game_state.get("achievements_viewing_difficulty", "easy")
             d_surf, d_btn = draw_text(
@@ -1018,8 +1011,10 @@ class AchievementsMenuState(State):
             self.buttons["diffs"][k] = d_btn
             cx += d_btn.width + 20
 
-        df = game_state.get("achievements_viewing_difficulty", "easy")
-        sf = fonts["pedia_font"]
+        df, sf = (
+            game_state.get("achievements_viewing_difficulty", "easy"),
+            fonts["pedia_font"],
+        )
         screen.blit(
             draw_text(
                 f"{get_text(texts, 'max_combo_classic')} {vp_data.get(f'max_combo_classic_{df}', 0)}",
@@ -1084,7 +1079,6 @@ class AchievementsMenuState(State):
             )
             q_rect.centerx, q_rect.y = dr.centerx, dr.y + 40
             screen.blit(q_surf, q_rect)
-
             y_surf, y_btn = draw_text(
                 get_text(texts, "yes"), fonts["small_font"], (200, 80, 80)
             )
@@ -1094,7 +1088,6 @@ class AchievementsMenuState(State):
                     get_text(texts, "yes"), fonts["small_font"], (255, 120, 120)
                 )
             screen.blit(y_surf, y_btn)
-
             n_surf, n_btn = draw_text(
                 get_text(texts, "no"), fonts["small_font"], (80, 200, 80)
             )
@@ -1135,8 +1128,7 @@ class BirdpediaMenuState(State):
         items = get_text(texts, "pedia_items")
         ipc = (len(items) + 1) // 2
         for i, item in enumerate(items):
-            x = 150 if i < ipc else 450
-            y = 300 + (i if i < ipc else i - ipc) * 40
+            x, y = 150 if i < ipc else 450, 300 + (i if i < ipc else i - ipc) * 40
             t_surf, t_btn = draw_text(item, fonts["small_font"], (0, 0, 0))
             t_btn.topleft = (x, y)
             if t_btn.collidepoint(mx, my):
@@ -1193,13 +1185,11 @@ class BirdpediaDetailState(State):
             .get(item, get_text(texts, "pedia_not_found"))
             .split(" ")
         )
-        x, y = 300, 280
-        sp = fonts["pedia_font"].size(" ")[0]
+        x, y, sp = 300, 280, fonts["pedia_font"].size(" ")[0]
         for w in words:
             ws = fonts["pedia_font"].render(w, True, (0, 0, 0))
             if x + ws.get_width() >= 750:
-                x = 300
-                y += fonts["pedia_font"].get_linesize()
+                x, y = 300, y + fonts["pedia_font"].get_linesize()
             screen.blit(ws, (x, y))
             x += ws.get_width() + sp
 
@@ -1245,10 +1235,8 @@ class LevelSelectionState(State):
         )
         t_rect.centerx, t_rect.y = screen.get_width() // 2, 80
         screen.blit(t_surf, t_rect)
-
         cols, total, sp, r = 5, 20, 100, 35
-        sx = (screen.get_width() - (cols - 1) * sp) // 2
-        sy = t_rect.bottom + 80
+        sx, sy = (screen.get_width() - (cols - 1) * sp) // 2, t_rect.bottom + 80
 
         for i in range(total):
             x, y = sx + (i % cols) * sp, sy + (i // cols) * sp
@@ -1309,23 +1297,26 @@ class GameplayState(State):
                 if self.ui_buttons.get("close_hint") and self.ui_buttons[
                     "close_hint"
                 ].collidepoint(mx, my):
-                    game_state["show_campaign_hint_popup"] = False
-                    game_state["paused"] = False
+                    game_state["show_campaign_hint_popup"], game_state["paused"] = (
+                        False,
+                        False,
+                    )
                 return
             if game_state.get("show_training_popup"):
                 if self.ui_buttons.get("cont_training") and self.ui_buttons[
                     "cont_training"
                 ].collidepoint(mx, my):
-                    game_state["show_training_popup"] = False
-                    game_state["paused"] = False
+                    game_state["show_training_popup"], game_state["paused"] = (
+                        False,
+                        False,
+                    )
                     get_next_bird(game_state)
                 return
             if game_state.get("show_hint_popup"):
                 if self.ui_buttons.get("close_hint") and self.ui_buttons[
                     "close_hint"
                 ].collidepoint(mx, my):
-                    game_state["show_hint_popup"] = False
-                    game_state["paused"] = False
+                    game_state["show_hint_popup"], game_state["paused"] = False, False
                 return
             if game_state.get("campaign_level_complete"):
                 if self.ui_buttons.get("restart_btn") and self.ui_buttons[
@@ -1350,23 +1341,24 @@ class GameplayState(State):
                     game_state["training_complete"] = False
                 return
 
+            sc = game_state["scale_factor"]
             sp_r = pygame.Rect(
-                game_state["WIDTH"] - int(50 * game_state["scale_factor"]),
-                int(10 * game_state["scale_factor"]),
-                int(40 * game_state["scale_factor"]),
-                int(40 * game_state["scale_factor"]),
+                game_state["WIDTH"] - int(50 * sc),
+                int(10 * sc),
+                int(40 * sc),
+                int(40 * sc),
             )
             ps_r = pygame.Rect(
-                game_state["WIDTH"] - int(100 * game_state["scale_factor"]),
-                int(10 * game_state["scale_factor"]),
-                int(40 * game_state["scale_factor"]),
-                int(40 * game_state["scale_factor"]),
+                game_state["WIDTH"] - int(100 * sc),
+                int(10 * sc),
+                int(40 * sc),
+                int(40 * sc),
             )
             lb_r = pygame.Rect(
-                game_state["WIDTH"] // 2 - int(30 * game_state["scale_factor"]),
-                int(10 * game_state["scale_factor"]),
-                int(60 * game_state["scale_factor"]),
-                int(40 * game_state["scale_factor"]),
+                game_state["WIDTH"] // 2 - int(30 * sc),
+                int(10 * sc),
+                int(60 * sc),
+                int(40 * sc),
             )
 
             if sp_r.collidepoint(mx, my):
@@ -1454,14 +1446,17 @@ class GameplayState(State):
                     game_state["sling_y"],
                     game_state["scale_factor"],
                 )
-                game_state["show_rope"] = False
-                game_state["current_shot_hit"] = False
-                game_state["last_shot_path"] = []
+                (
+                    game_state["show_rope"],
+                    game_state["current_shot_hit"],
+                    game_state["last_shot_path"],
+                ) = (False, False, [])
                 if game_state["sound_on"]:
                     game_state["sounds"]["fly_sound"].play()
 
-    def update(self, game_state):
+    def update(self, dt, mx, my, game_state):
         mb = game_state.get("main_bird")
+        dt_factor = dt * 60.0
         is_paused = game_state["paused"] or (
             game_state["game_mode"] == "campaign"
             and (
@@ -1472,13 +1467,18 @@ class GameplayState(State):
             )
         )
 
-        mx, my = pygame.mouse.get_pos()
+        if game_state.get("screen_shake", 0) > 0:
+            game_state["screen_shake"] -= 1 * dt_factor
+            game_state["shake_offset"] = (random.randint(-5, 5), random.randint(-5, 5))
+        else:
+            game_state["shake_offset"] = (0, 0)
+
         if mb and mb.state == "dragging" and not is_paused:
             mb.drag_to(mx, my, game_state["WIDTH"], game_state["HEIGHT"])
 
         if game_state.get("campaign_is_swapping"):
             anim = game_state["campaign_swap_anim"]
-            anim["progress"] += 0.15
+            anim["progress"] += 0.15 * dt_factor
             if anim["progress"] >= 1.0:
                 anim["progress"] = 1.0
                 r1, c1 = anim["tile1_pos"]
@@ -1499,8 +1499,8 @@ class GameplayState(State):
         if game_state["game_mode"] == "campaign" and game_state.get(
             "campaign_is_processing"
         ):
-            update_campaign_board(game_state)
-        update_game_state(game_state)
+            update_campaign_board(dt, game_state)
+        update_game_state(dt, game_state)
 
         if (
             not is_paused
@@ -1509,6 +1509,7 @@ class GameplayState(State):
         ):
             if mb and mb.state == "jumping":
                 mb.update(
+                    dt,
                     game_state["gravity"],
                     game_state["GROUND_LEVEL"],
                     game_state["WIDTH"],
@@ -1528,6 +1529,7 @@ class GameplayState(State):
                     create_trail_particle(game_state["trail_particles"], mb.x, mb.y)
                 if (
                     mb.update(
+                        dt,
                         game_state["gravity"],
                         game_state["GROUND_LEVEL"],
                         game_state["WIDTH"],
@@ -1543,15 +1545,17 @@ class GameplayState(State):
                     )
 
             if "targets" in game_state:
-                game_state["targets"].update(game_state["WIDTH"], game_state["HEIGHT"])
+                game_state["targets"].update(
+                    dt, game_state["WIDTH"], game_state["HEIGHT"]
+                )
             if "obstacles" in game_state:
                 game_state["obstacles"].update(
-                    game_state["WIDTH"], game_state["HEIGHT"]
+                    dt, game_state["WIDTH"], game_state["HEIGHT"]
                 )
 
             for sb in game_state.get("small_birds", []):
                 if (
-                    sb.update(game_state["gravity"], game_state["GROUND_LEVEL"])
+                    sb.update(dt, game_state["gravity"], game_state["GROUND_LEVEL"])
                     == "hit_ground"
                 ):
                     create_dust_particle(
@@ -1562,7 +1566,7 @@ class GameplayState(State):
                     )
             for dp in game_state.get("defeated_pigs", []):
                 if (
-                    dp.update(game_state["gravity"], game_state["GROUND_LEVEL"])
+                    dp.update(dt, game_state["gravity"], game_state["GROUND_LEVEL"])
                     == "hit_ground"
                 ):
                     create_dust_particle(
@@ -1571,6 +1575,8 @@ class GameplayState(State):
                         dp.y + dp.size // 2,
                         count=30,
                     )
+
+            update_feathers(game_state["feather_particles"], dt)
 
             if mb and mb.state in ["flying", "tumbling"]:
                 for t in pygame.sprite.spritecollide(
@@ -1818,11 +1824,7 @@ class GameplayState(State):
                         game_state["game_over"] = True
 
     def draw(self, screen, mx, my, game_state):
-        shake = (0, 0)
-        if game_state.get("screen_shake", 0) > 0:
-            game_state["screen_shake"] -= 1
-            shake = (random.randint(-5, 5), random.randint(-5, 5))
-
+        shake = game_state.get("shake_offset", (0, 0))
         bg = game_state["images"]["background"]
         screen.blit(
             bg,
@@ -1866,11 +1868,32 @@ class GameplayState(State):
         draw_particles(screen, game_state["trail_particles"])
         draw_particles(screen, game_state["dust_particles"])
         draw_particles(screen, game_state["spark_particles"])
-        if not game_state["paused"]:
-            update_and_draw_feathers(
-                screen,
-                game_state["feather_particles"],
-                game_state["images"]["feather_imgs"],
+        draw_feathers(
+            screen,
+            game_state["feather_particles"],
+            game_state["images"]["feather_imgs"],
+        )
+
+        if game_state["explosion_active"]:
+            er, mx_f = (
+                game_state["EXPLOSION_RADIUS"],
+                game_state["MAX_EXPLOSION_FRAMES"],
+            )
+            sm_copy = game_state["images"]["smoke_img"].copy()
+            sm_copy.set_alpha(
+                max(
+                    0,
+                    min(
+                        255, int(255 * (max(0, game_state["explosion_frames"]) / mx_f))
+                    ),
+                )
+            )
+            screen.blit(
+                sm_copy,
+                (
+                    game_state["explosion_center"][0] - er,
+                    game_state["explosion_center"][1] - er,
+                ),
             )
 
         if game_state.get("show_campaign_hint_popup"):
@@ -1914,10 +1937,11 @@ class GameplayState(State):
                             p = game_state["campaign_clear_progress"]
                             alpha, sf = int(255 * (1.0 - p)), 0.9 * (1.0 - p)
                         if alpha > 0:
-                            img = game_state["images"]["bird_imgs"][b_idx]
                             si = int(cs * sf)
                             if si > 0:
-                                simg = pygame.transform.scale(img, (si, si))
+                                simg = pygame.transform.scale(
+                                    game_state["images"]["bird_imgs"][b_idx], (si, si)
+                                )
                                 simg.set_alpha(alpha)
                                 bs.blit(
                                     simg,

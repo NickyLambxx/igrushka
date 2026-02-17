@@ -13,7 +13,7 @@ class MainBird:
         self.vy = 0.0
         self.rect = pygame.Rect(start_x - size // 2, start_y - size // 2, size, size)
 
-        self.state = "idle"  # Состояния: idle, dragging, flying, tumbling, jumping, dead, out_of_bounds
+        self.state = "idle"
         self.angle = 0.0
         self.angular_velocity = 0.0
         self.tumble_timer = 0
@@ -21,13 +21,11 @@ class MainBird:
         self.image = None
         self.type_index = 0
 
-        # Флаги способностей
         self.boost_available = False
         self.is_boosted = False
         self.split_available = False
         self.boomerang_available = False
 
-        # Анимация прыжка
         self.jump_progress = 0.0
         self.jump_start_pos = (0, 0)
         self.jump_image = None
@@ -81,14 +79,15 @@ class MainBird:
         elif self.type_index == 4:
             self.boomerang_available = True
 
-    def update(self, gravity, ground_level, screen_width, screen_height):
+    def update(self, dt, gravity, ground_level, screen_width, screen_height):
+        dt_factor = dt * 60.0
         event = None
         if self.state == "flying":
-            self.x += self.vx
-            self.y += self.vy
-            self.vy += gravity
-            if self.type_index == 4:  # Бумеранг вращается в полете
-                self.angle -= 15
+            self.x += self.vx * dt_factor
+            self.y += self.vy * dt_factor
+            self.vy += gravity * dt_factor
+            if self.type_index == 4:
+                self.angle -= 15 * dt_factor
             self.update_rect()
 
             if self.y >= ground_level - self.size // 2:
@@ -109,12 +108,15 @@ class MainBird:
                 event = "out_of_bounds"
 
         elif self.state == "tumbling":
-            self.tumble_timer -= 1
-            self.x += self.vx
-            self.angle += self.angular_velocity
+            self.tumble_timer -= 1 * dt_factor
+            self.x += self.vx * dt_factor
+            self.angle += self.angular_velocity * dt_factor
             self.update_rect()
-            self.vx *= 0.95
-            self.angular_velocity *= 0.99
+
+            # Трение с учетом dt
+            self.vx *= 0.95**dt_factor
+            self.angular_velocity *= 0.99**dt_factor
+
             if abs(self.vx) < 0.1:
                 self.vx = 0
             if self.tumble_timer <= 0 or self.vx == 0:
@@ -122,7 +124,7 @@ class MainBird:
                 event = "stopped"
 
         elif self.state == "jumping":
-            self.jump_progress += 0.05
+            self.jump_progress += 0.05 * dt_factor
             p = min(1.0, self.jump_progress)
             sx, sy = self.jump_start_pos
             ex, ey = self.start_x, self.start_y
@@ -159,12 +161,17 @@ class Target(pygame.sprite.Sprite):
         self.rect = rect
         self.vx = vx
         self.vy = vy
+        self.x = float(rect.x)
+        self.y = float(rect.y)
 
-    def update(self, screen_width, screen_height):
+    def update(self, dt, screen_width, screen_height):
+        dt_factor = dt * 60.0
         if self.vx != 0 or self.vy != 0:
-            self.rect.x += self.vx
-            self.rect.y += self.vy
-            # Отскок от границ
+            self.x += self.vx * dt_factor
+            self.y += self.vy * dt_factor
+            self.rect.x = int(self.x)
+            self.rect.y = int(self.y)
+
             if not (0 < self.rect.left and self.rect.right < screen_width):
                 self.vx = -self.vx
             if not (0 < self.rect.top and self.rect.bottom < screen_height):
@@ -177,12 +184,17 @@ class Obstacle(pygame.sprite.Sprite):
         self.rect = rect
         self.vx = vx
         self.vy = vy
+        self.x = float(rect.x)
+        self.y = float(rect.y)
 
-    def update(self, screen_width, screen_height):
+    def update(self, dt, screen_width, screen_height):
+        dt_factor = dt * 60.0
         if self.vx != 0 or self.vy != 0:
-            self.rect.x += self.vx
-            self.rect.y += self.vy
-            # Отскок от границ
+            self.x += self.vx * dt_factor
+            self.y += self.vy * dt_factor
+            self.rect.x = int(self.x)
+            self.rect.y = int(self.y)
+
             if not (0 < self.rect.left and self.rect.right < screen_width):
                 self.vx = -self.vx
             if not (0 < self.rect.top and self.rect.bottom < screen_height):
@@ -203,12 +215,13 @@ class SmallBird(pygame.sprite.Sprite):
         self.angle = 0.0
         self.angular_velocity = 0.0
 
-    def update(self, gravity, ground_level):
+    def update(self, dt, gravity, ground_level):
+        dt_factor = dt * 60.0
         event = None
         if self.state == "flying":
-            self.x += self.vx
-            self.y += self.vy
-            self.vy += gravity
+            self.x += self.vx * dt_factor
+            self.y += self.vy * dt_factor
+            self.vy += gravity * dt_factor
             self.rect.center = (int(self.x), int(self.y))
             if self.y >= ground_level - self.size // 2:
                 self.state = "tumbling"
@@ -218,12 +231,14 @@ class SmallBird(pygame.sprite.Sprite):
                 self.angular_velocity = self.vx * -1.5
                 event = "hit_ground"
         elif self.state == "tumbling":
-            self.tumble_timer -= 1
-            self.x += self.vx
-            self.angle += self.angular_velocity
+            self.tumble_timer -= 1 * dt_factor
+            self.x += self.vx * dt_factor
+            self.angle += self.angular_velocity * dt_factor
             self.rect.centerx = int(self.x)
-            self.vx *= 0.95
-            self.angular_velocity *= 0.99
+
+            self.vx *= 0.95**dt_factor
+            self.angular_velocity *= 0.99**dt_factor
+
             if abs(self.vx) < 0.1:
                 self.vx = 0
             if self.tumble_timer <= 0 or self.vx == 0:
@@ -248,18 +263,19 @@ class DefeatedPig(pygame.sprite.Sprite):
         self.on_ground = False
         self.timer = -1
 
-    def update(self, gravity, ground_level):
+    def update(self, dt, gravity, ground_level):
+        dt_factor = dt * 60.0
         event = None
         if not self.on_ground:
-            self.vy += gravity
-            self.y += self.vy
+            self.vy += gravity * dt_factor
+            self.y += self.vy * dt_factor
             if self.y >= ground_level - self.size // 2:
                 self.y = ground_level - self.size // 2
                 self.on_ground = True
                 self.timer = 15
                 event = "hit_ground"
         else:
-            self.timer -= 1
+            self.timer -= 1 * dt_factor
             if self.timer <= 0:
                 event = "dead"
                 self.kill()

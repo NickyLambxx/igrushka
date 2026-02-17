@@ -10,43 +10,30 @@ def draw_text(text, font, color):
 
 
 def get_text(current_texts, key):
-    """
-    Безопасно получает текст по ключу.
-    Если ключ не найден в текущем языке, пытается найти его в русском (fallback).
-    Если и там не найден, возвращает сам ключ в квадратных скобках как заглушку.
-    """
     text = current_texts.get(key)
     if text is not None:
         return text
-
     text = LANGUAGES["ru"].get(key)
     if text is not None:
         return text
-
     print(f"Warning: Localization key '{key}' not found in any language.")
     return f"[{key}]"
 
 
 def create_target(WIDTH, HEIGHT, size):
-    x_min = int(WIDTH * 0.4)
-    x_max = WIDTH - size - 20
-    y_min = int(HEIGHT * 0.2)
-    y_max = HEIGHT - size - int(HEIGHT * 0.25)
-
-    x = random.randint(x_min, x_max)
-    y = random.randint(y_min, y_max)
-    return pygame.Rect(x, y, size, size)
+    x_min, x_max = int(WIDTH * 0.4), WIDTH - size - 20
+    y_min, y_max = int(HEIGHT * 0.2), HEIGHT - size - int(HEIGHT * 0.25)
+    return pygame.Rect(
+        random.randint(x_min, x_max), random.randint(y_min, y_max), size, size
+    )
 
 
 def create_obstacle(WIDTH, HEIGHT, size):
-    x_min = int(WIDTH * 0.4)
-    x_max = WIDTH - size - 50
-    y_min = int(HEIGHT * 0.2)
-    y_max = HEIGHT - size - int(HEIGHT * 0.3)
-
-    x = random.randint(x_min, x_max)
-    y = random.randint(y_min, y_max)
-    return pygame.Rect(x, y, size, size)
+    x_min, x_max = int(WIDTH * 0.4), WIDTH - size - 50
+    y_min, y_max = int(HEIGHT * 0.2), HEIGHT - size - int(HEIGHT * 0.3)
+    return pygame.Rect(
+        random.randint(x_min, x_max), random.randint(y_min, y_max), size, size
+    )
 
 
 def create_trail_particle(trail_particles, x, y):
@@ -62,7 +49,6 @@ def create_trail_particle(trail_particles, x, y):
 
 
 def create_dust_particle(dust_particles, x, y, count=1):
-    """Создает заданное количество частиц пыли."""
     for _ in range(count):
         dust_particles.append(
             {
@@ -78,7 +64,6 @@ def create_dust_particle(dust_particles, x, y, count=1):
 
 
 def create_brick_shatter(dust_particles, x, y):
-    """Создает эффект осколков кирпича"""
     for _ in range(15):
         dust_particles.append(
             {
@@ -88,7 +73,7 @@ def create_brick_shatter(dust_particles, x, y):
                 "life": random.randint(30, 50),
                 "dx": random.uniform(-3, 3),
                 "dy": random.uniform(-4, 1),
-                "color": (139, 69, 19),  # Коричневый цвет
+                "color": (139, 69, 19),
             }
         )
 
@@ -126,13 +111,14 @@ def create_feather_explosion(feather_particles, x, y, bird_index):
         )
 
 
-def update_particles(particles):
-    gravity = 0.2
+def update_particles(particles, dt):
+    dt_factor = dt * 60.0
+    gravity = 0.2 * dt_factor
     for p in particles[:]:
-        p["life"] -= 1
+        p["life"] -= 1 * dt_factor
         if "dx" in p:
-            p["x"] += p["dx"]
-            p["y"] += p["dy"]
+            p["x"] += p["dx"] * dt_factor
+            p["y"] += p["dy"] * dt_factor
             p["dy"] += gravity
         if p["life"] <= 0:
             particles.remove(p)
@@ -140,7 +126,7 @@ def update_particles(particles):
 
 def draw_particles(screen, particles):
     for p in particles:
-        alpha = min(255, p["life"] * 8)
+        alpha = min(255, max(0, int(p["life"] * 8)))
         color = (*p["color"], alpha)
         s = pygame.Surface((p["size"] * 2, p["size"] * 2), pygame.SRCALPHA)
         if p["color"] == (139, 69, 19):
@@ -150,38 +136,34 @@ def draw_particles(screen, particles):
         screen.blit(s, (p["x"] - p["size"], p["y"] - p["size"]))
 
 
-def update_and_draw_feathers(screen, feather_particles, feather_imgs):
+def update_feathers(feather_particles, dt):
+    dt_factor = dt * 60.0
     for p in feather_particles[:]:
-        p["life"] -= 1
+        p["life"] -= 1 * dt_factor
         if p["life"] <= 0:
             feather_particles.remove(p)
             continue
+        p["vy"] += p["gravity"] * dt_factor
+        p["x"] += p["vx"] * dt_factor
+        p["y"] += p["vy"] * dt_factor
+        p["angle"] += p["angular_velocity"] * dt_factor
 
-        p["vy"] += p["gravity"]
-        p["x"] += p["vx"]
-        p["y"] += p["vy"]
-        p["angle"] += p["angular_velocity"]
 
-        bird_index = p.get("bird_index", 0)
-        feather_img = feather_imgs[bird_index]
-
+def draw_feathers(screen, feather_particles, feather_imgs):
+    for p in feather_particles:
+        feather_img = feather_imgs[p.get("bird_index", 0)]
         rotated_img = pygame.transform.rotate(feather_img, p["angle"])
         new_rect = rotated_img.get_rect(center=(p["x"], p["y"]))
-
         alpha = max(0, min(255, int(255 * (p["life"] / 30))))
         rotated_img.set_alpha(alpha)
-
         screen.blit(rotated_img, new_rect)
 
 
 def draw_dashed_trajectory(
     screen, start_x, start_y, velocity_x, velocity_y, gravity, steps=50
 ):
-    points = []
-    x, y = start_x, start_y
-    vx, vy = velocity_x, velocity_y
-    partial_steps = max(5, int(steps * 0.3))
-    for _ in range(partial_steps):
+    points, x, y, vx, vy = [], start_x, start_y, velocity_x, velocity_y
+    for _ in range(max(5, int(steps * 0.3))):
         x += vx
         y += vy
         vy += gravity
