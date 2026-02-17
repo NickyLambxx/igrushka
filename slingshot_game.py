@@ -2,6 +2,7 @@ import pygame
 import math
 import random
 import time
+import pymunk
 from utils import (
     draw_text,
     get_text,
@@ -39,7 +40,7 @@ def get_next_bird(game_state):
                 game_state["training_complete"] = True
                 game_state["current_bird_img"] = None
                 if mb:
-                    mb.image = None
+                    mb.die()
                 return
             else:
                 game_state["show_training_popup"] = True
@@ -48,7 +49,7 @@ def get_next_bird(game_state):
                 ][game_state["training_bird_index"]]
                 game_state["current_bird_img"] = None
                 if mb:
-                    mb.image = None
+                    mb.die()
                 return
         idx = game_state["training_bird_index"]
         game_state["current_bird_img"] = game_state["images"]["bird_imgs"][idx]
@@ -60,7 +61,7 @@ def get_next_bird(game_state):
             game_state["game_over"] = True
             game_state["current_bird_img"] = None
             if mb:
-                mb.image = None
+                mb.die()
             return
         game_state["current_shot_hit"] = False
         bird_img = game_state["bird_queue"].pop(0)
@@ -100,13 +101,16 @@ def split_bird(game_state):
     img = game_state["images"]["small_bird_img"]
     for i in range(3):
         angle = math.radians(120 * i)
+        vx = bird.body.velocity.x + math.cos(angle) * 300
+        vy = bird.body.velocity.y + math.sin(angle) * 300
         game_state["small_birds"].add(
             SmallBird(
-                bird.x,
-                bird.y,
-                bird.vx + math.cos(angle) * 3,
-                bird.vy + math.sin(angle) * 3,
+                bird.body.position.x,
+                bird.body.position.y,
+                vx,
+                vy,
                 sz,
+                game_state["space"],
                 img,
             )
         )
@@ -116,13 +120,12 @@ def split_bird(game_state):
         except:
             pass
     bird.split_available = False
-    bird.state = "dead"
+    bird.die()
 
 
 def activate_boomerang(game_state):
     bird = game_state["main_bird"]
-    bird.vx = -15
-    bird.vy = 0
+    bird.body.velocity = (-900, 0)
     bird.boomerang_available = False
     if game_state["sound_on"] and game_state["sounds"].get("boomerang_sound"):
         try:
@@ -180,8 +183,47 @@ def reset_slingshot(game_state):
             num_targets = 3
             game_state["target_duration"] = 5
 
+    # PyMunk Space Setup
+    game_state["space"] = pymunk.Space()
+    game_state["space"].gravity = (0, 1800)
+
+    floor = pymunk.Segment(
+        game_state["space"].static_body,
+        (-2000, game_state["GROUND_LEVEL"]),
+        (game_state["WIDTH"] + 2000, game_state["GROUND_LEVEL"]),
+        50,
+    )
+    floor.friction = 1.0
+    floor.elasticity = 0.5
+    game_state["space"].add(floor)
+
+    walls = [
+        pymunk.Segment(
+            game_state["space"].static_body, (0, -2000), (0, game_state["HEIGHT"]), 50
+        ),
+        pymunk.Segment(
+            game_state["space"].static_body,
+            (game_state["WIDTH"], -2000),
+            (game_state["WIDTH"], game_state["HEIGHT"]),
+            50,
+        ),
+        pymunk.Segment(
+            game_state["space"].static_body,
+            (-2000, -2000),
+            (game_state["WIDTH"] + 2000, -2000),
+            50,
+        ),
+    ]
+    for w in walls:
+        w.elasticity = 0.8
+        w.friction = 0.5
+        game_state["space"].add(w)
+
     game_state["main_bird"] = MainBird(
-        game_state["sling_x"], game_state["sling_y"], game_state["object_size"]
+        game_state["sling_x"],
+        game_state["sling_y"],
+        game_state["object_size"],
+        game_state["space"],
     )
     if game_state.get("current_bird_img"):
         try:
@@ -231,7 +273,8 @@ def reset_slingshot(game_state):
             ):
                 game_state["targets"].add(
                     Target(
-                        nr,
+                        nr.centerx,
+                        nr.centery,
                         (
                             random.uniform(0.5, 2.0) * sm * random.choice([-1, 1])
                             if sm > 0
@@ -242,6 +285,8 @@ def reset_slingshot(game_state):
                             if sm > 0
                             else 0
                         ),
+                        game_state["object_size"],
+                        game_state["space"],
                         target_img,
                     )
                 )
@@ -258,7 +303,8 @@ def reset_slingshot(game_state):
             ):
                 game_state["obstacles"].add(
                     Obstacle(
-                        nr,
+                        nr.centerx,
+                        nr.centery,
                         (
                             random.uniform(0.5, 2.0) * sm * random.choice([-1, 1])
                             if sm > 0
@@ -269,6 +315,8 @@ def reset_slingshot(game_state):
                             if sm > 0
                             else 0
                         ),
+                        game_state["object_size"],
+                        game_state["space"],
                         obs_img,
                     )
                 )
@@ -368,11 +416,17 @@ class SlingshotState(State):
                 ):
                     if game_state["sound_on"]:
                         game_state["sounds"]["boost_sound"].play()
-                    mb.vx *= 2.0
-                    mb.vy *= 2.0
+                    mb.body.velocity = (
+                        mb.body.velocity.x * 2.0,
+                        mb.body.velocity.y * 2.0,
+                    )
                     mb.is_boosted = True
                     game_state["boost_trail_start_time"] = time.time()
-                    create_spark_particle(game_state["spark_particles"], mb.x, mb.y)
+                    create_spark_particle(
+                        game_state["spark_particles"],
+                        mb.body.position.x,
+                        mb.body.position.y,
+                    )
                 elif mb.state == "flying" and mb.type_index == 3 and mb.split_available:
                     split_bird(game_state)
                 elif (
@@ -414,6 +468,9 @@ class SlingshotState(State):
         if is_paused:
             return
 
+        # ДВИЖОК: Шаг симуляции физики PyMunk
+        game_state["space"].step(dt)
+
         update_particles(game_state["trail_particles"], dt)
         update_particles(game_state["dust_particles"], dt)
         update_particles(game_state["spark_particles"], dt)
@@ -444,7 +501,6 @@ class SlingshotState(State):
                     game_state["last_shot_path"].append((mb.x, mb.y))
                 if random.random() < 0.5:
                     create_trail_particle(game_state["trail_particles"], mb.x, mb.y)
-
                 if (
                     mb.update(
                         dt,
@@ -470,7 +526,6 @@ class SlingshotState(State):
                 game_state["obstacles"].update(
                     dt, game_state["WIDTH"], game_state["HEIGHT"]
                 )
-
             for sb in game_state.get("small_birds", []):
                 if (
                     sb.update(dt, game_state["gravity"], game_state["GROUND_LEVEL"])
@@ -497,9 +552,10 @@ class SlingshotState(State):
             update_feathers(game_state["feather_particles"], dt)
             td_img = game_state["images"]["target_defeated_img"]
 
+            # ГИБРИДНЫЕ КОЛЛИЗИИ: Pygame Masks для обработки урона поверх физики PyMunk
             if mb and mb.state in ["flying", "tumbling"]:
                 for t in pygame.sprite.spritecollide(
-                    mb, game_state.get("targets", []), False
+                    mb, game_state.get("targets", []), False, pygame.sprite.collide_mask
                 ):
                     game_state["current_shot_hit"] = True
                     if mb.type_index == 1:
@@ -526,8 +582,9 @@ class SlingshotState(State):
                                 DefeatedPig(
                                     x.rect.centerx,
                                     x.rect.centery,
-                                    random.uniform(-2, 0),
+                                    random.uniform(-120, 0),
                                     game_state["object_size"],
+                                    game_state["space"],
                                     td_img,
                                 )
                             )
@@ -552,13 +609,14 @@ class SlingshotState(State):
                             DefeatedPig(
                                 t.rect.centerx,
                                 t.rect.centery,
-                                -abs(mb.vy * 0.2),
+                                -abs(mb.body.velocity.y * 0.05),
                                 game_state["object_size"],
+                                game_state["space"],
                                 td_img,
                             )
                         )
                         t.kill()
-                    mb.state = "dead"
+                    mb.die()
                     break
 
                 if game_state["game_mode"] == "obstacle" and mb.state in [
@@ -566,14 +624,19 @@ class SlingshotState(State):
                     "tumbling",
                 ]:
                     for o in pygame.sprite.spritecollide(
-                        mb, game_state.get("obstacles", []), False
+                        mb,
+                        game_state.get("obstacles", []),
+                        False,
+                        pygame.sprite.collide_mask,
                     ):
                         create_brick_shatter(
                             game_state["dust_particles"], o.rect.centerx, o.rect.centery
                         )
-                        o.kill()
-                        mb.vx *= 0.5
-                        mb.vy *= 0.5
+                        o.kill()  # Физически убираем препятствие из пространства
+                        mb.body.velocity = (
+                            mb.body.velocity.x * 0.5,
+                            mb.body.velocity.y * 0.5,
+                        )  # Потеря кинетической энергии
                         if game_state["sound_on"]:
                             game_state["sounds"]["brick_sound"].play()
                         break
@@ -581,7 +644,10 @@ class SlingshotState(State):
             for sb in game_state.get("small_birds", []):
                 if sb.state in ["flying", "tumbling"]:
                     for t in pygame.sprite.spritecollide(
-                        sb, game_state.get("targets", []), False
+                        sb,
+                        game_state.get("targets", []),
+                        False,
+                        pygame.sprite.collide_mask,
                     ):
                         create_feather_explosion(
                             game_state["feather_particles"],
@@ -599,16 +665,20 @@ class SlingshotState(State):
                                 t.rect.centery,
                                 0,
                                 game_state["object_size"],
+                                game_state["space"],
                                 td_img,
                             )
                         )
                         t.kill()
-                        sb.state = "dead"
                         sb.kill()
+                        sb.state = "dead"
                         break
                     if game_state["game_mode"] == "obstacle" and sb.state != "dead":
                         for o in pygame.sprite.spritecollide(
-                            sb, game_state.get("obstacles", []), False
+                            sb,
+                            game_state.get("obstacles", []),
+                            False,
+                            pygame.sprite.collide_mask,
                         ):
                             create_brick_shatter(
                                 game_state["dust_particles"],
@@ -616,82 +686,13 @@ class SlingshotState(State):
                                 o.rect.centery,
                             )
                             o.kill()
-                            sb.vx *= 0.5
-                            sb.vy *= 0.5
+                            sb.body.velocity = (
+                                sb.body.velocity.x * 0.5,
+                                sb.body.velocity.y * 0.5,
+                            )
                             if game_state["sound_on"]:
                                 game_state["sounds"]["brick_sound"].play()
                             break
-
-            for dp in [
-                x
-                for x in game_state.get("defeated_pigs", [])
-                if x.timer <= 0 and x.on_ground
-            ]:
-                dp.kill()
-                if game_state["game_mode"] not in ["training", "developer", "campaign"]:
-                    sm = SPEED_MULTIPLIER.get(game_state["difficulty"], 0)
-                    t_img = game_state["images"]["target_img"]
-                    if game_state["game_mode"] != "sharpshooter":
-                        while True:
-                            nr = create_target(
-                                game_state["WIDTH"],
-                                game_state["HEIGHT"],
-                                game_state["object_size"],
-                            )
-                            if not any(
-                                nr.inflate(10, 10).colliderect(t.rect)
-                                for t in game_state["targets"]
-                            ) and not any(
-                                nr.inflate(10, 10).colliderect(o.rect)
-                                for o in game_state["obstacles"]
-                            ):
-                                game_state["targets"].add(
-                                    Target(
-                                        nr,
-                                        (
-                                            random.uniform(0.5, 2.0)
-                                            * sm
-                                            * random.choice([-1, 1])
-                                            if sm > 0
-                                            else 0
-                                        ),
-                                        (
-                                            random.uniform(0.5, 2.0)
-                                            * sm
-                                            * random.choice([-1, 1])
-                                            if sm > 0
-                                            else 0
-                                        ),
-                                        t_img,
-                                    )
-                                )
-                                break
-                    else:
-                        game_state["targets"].add(
-                            Target(
-                                create_target(
-                                    game_state["WIDTH"],
-                                    game_state["HEIGHT"],
-                                    game_state["object_size"],
-                                ),
-                                (
-                                    random.uniform(0.5, 2.0)
-                                    * sm
-                                    * random.choice([-1, 1])
-                                    if sm > 0
-                                    else 0
-                                ),
-                                (
-                                    random.uniform(0.5, 2.0)
-                                    * sm
-                                    * random.choice([-1, 1])
-                                    if sm > 0
-                                    else 0
-                                ),
-                                t_img,
-                            )
-                        )
-                        game_state["target_timer_start"] = time.time()
 
             if (
                 mb
@@ -704,7 +705,7 @@ class SlingshotState(State):
                     ] not in ["developer", "training", "campaign"]:
                         game_state["lives"] -= 1
                         game_state["combo"] = 0
-                    mb.state = "dead"
+                    mb.die()
                 get_next_bird(game_state)
 
             if (
@@ -725,11 +726,8 @@ class SlingshotState(State):
                         t_img = game_state["images"]["target_img"]
                         game_state["targets"].add(
                             Target(
-                                create_target(
-                                    game_state["WIDTH"],
-                                    game_state["HEIGHT"],
-                                    game_state["object_size"],
-                                ),
+                                game_state["WIDTH"] // 2,
+                                game_state["HEIGHT"] // 2,
                                 (
                                     random.uniform(0.5, 2.0)
                                     * sm
@@ -744,6 +742,8 @@ class SlingshotState(State):
                                     if sm > 0
                                     else 0
                                 ),
+                                game_state["object_size"],
+                                game_state["space"],
                                 t_img,
                             )
                         )

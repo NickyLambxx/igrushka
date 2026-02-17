@@ -199,7 +199,6 @@ def init_game():
     state_manager.add_state("birdpedia_menu", BirdpediaMenuState())
     state_manager.add_state("birdpedia_detail", BirdpediaDetailState())
 
-    # Регистрация изолированных движков
     state_manager.add_state("match3", Match3State())
     state_manager.add_state("slingshot", SlingshotState())
 
@@ -220,6 +219,8 @@ def main():
 
     while sm.running:
         dt = clock.tick(60) / 1000.0
+        # Ограничение delta time предотвращает "взрывы" физики PyMunk при лагах или перемещении окна
+        dt = min(dt, 0.05)
         mx, my = pygame.mouse.get_pos()
 
         for event in pygame.event.get():
