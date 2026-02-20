@@ -2,16 +2,10 @@ import pygame
 import math
 import pymunk
 
-# Фильтры коллизий: указывают, кто с кем сталкивается (категория объекта, с кем он может сталкиваться)
-BIRD_FILTER = pymunk.ShapeFilter(
-    categories=0b0001, mask=0b1010
-)  # Птица бьет блоки и стены
-TARGET_FILTER = pymunk.ShapeFilter(
-    categories=0b0010, mask=0b1011
-)  # Блоки бьют птицу, блоки и стены
-DEBRIS_FILTER = pymunk.ShapeFilter(
-    categories=0b0100, mask=0b1000
-)  # Обломки бьют ТОЛЬКО стены (чтобы не взрываться внутри друг друга)
+# Фильтры для предотвращения "взрывов" внутри друг друга
+BIRD_FILTER = pymunk.ShapeFilter(categories=0b0001, mask=0b1010)
+TARGET_FILTER = pymunk.ShapeFilter(categories=0b0010, mask=0b1011)
+DEBRIS_FILTER = pymunk.ShapeFilter(categories=0b0100, mask=0b1000)
 
 
 class MainBird(pygame.sprite.Sprite):
@@ -56,29 +50,9 @@ class MainBird(pygame.sprite.Sprite):
     def x(self):
         return self.body.position.x
 
-    @x.setter
-    def x(self, value):
-        self.body.position = (value, self.body.position.y)
-
     @property
     def y(self):
         return self.body.position.y
-
-    @y.setter
-    def y(self, value):
-        self.body.position = (self.body.position.x, value)
-
-    def _prevent_physics_explosion(self):
-        """Защита от краша при расчете NaN координат"""
-        if (
-            math.isnan(self.body.position.x)
-            or math.isnan(self.body.position.y)
-            or math.isnan(self.body.angle)
-        ):
-            self.body.position = (self.start_x, self.start_y)
-            self.body.velocity = (0, 0)
-            self.body.angle = 0.0
-            self.body.angular_velocity = 0.0
 
     def kill(self):
         if hasattr(self, "shape") and self.shape in self.space.shapes:
@@ -114,11 +88,17 @@ class MainBird(pygame.sprite.Sprite):
         self.update_rect()
 
     def update_rect(self):
-        self._prevent_physics_explosion()
+        if math.isnan(self.body.angle):
+            self.body.angle = 0.0
+        if math.isnan(self.body.position.x) or math.isnan(self.body.position.y):
+            self.body.position = (self.start_x, self.start_y)
+
         if self.original_image:
-            self.image = pygame.transform.rotate(
-                self.original_image, math.degrees(-self.body.angle)
-            )
+            angle_deg = math.degrees(-self.body.angle) % 360
+            try:
+                self.image = pygame.transform.rotate(self.original_image, angle_deg)
+            except ValueError:
+                self.image = self.original_image
             self.mask = pygame.mask.from_surface(self.image)
             self.rect = self.image.get_rect(center=(int(self.x), int(self.y)))
 
@@ -157,7 +137,6 @@ class MainBird(pygame.sprite.Sprite):
 
     def update(self, dt, gravity, ground_level, screen_width, screen_height):
         event = None
-        self._prevent_physics_explosion()
 
         if self.state in ["flying", "tumbling"]:
             if self.type_index == 4 and self.state == "flying":
@@ -237,22 +216,21 @@ class Target(pygame.sprite.Sprite):
         return self.body.position.y
 
     def kill(self):
-        if self.shape in self.space.shapes:
+        if hasattr(self, "shape") and self.shape in self.space.shapes:
             self.space.remove(self.body, self.shape)
         super().kill()
 
     def update(self, dt, screen_width, screen_height):
-        if (
-            math.isnan(self.body.position.x)
-            or math.isnan(self.body.position.y)
-            or math.isnan(self.body.angle)
-        ):
-            self.body.position = (100, 100)
+        if math.isnan(self.body.angle):
             self.body.angle = 0.0
+        if math.isnan(self.x) or math.isnan(self.y):
+            self.body.position = (100, 100)
 
-        self.image = pygame.transform.rotate(
-            self.original_image, math.degrees(-self.body.angle)
-        )
+        angle_deg = math.degrees(-self.body.angle) % 360
+        try:
+            self.image = pygame.transform.rotate(self.original_image, angle_deg)
+        except ValueError:
+            self.image = self.original_image
         self.mask = pygame.mask.from_surface(self.image)
         self.rect = self.image.get_rect(center=(int(self.x), int(self.y)))
 
@@ -290,22 +268,21 @@ class Obstacle(pygame.sprite.Sprite):
         return self.body.position.y
 
     def kill(self):
-        if self.shape in self.space.shapes:
+        if hasattr(self, "shape") and self.shape in self.space.shapes:
             self.space.remove(self.body, self.shape)
         super().kill()
 
     def update(self, dt, screen_width, screen_height):
-        if (
-            math.isnan(self.body.position.x)
-            or math.isnan(self.body.position.y)
-            or math.isnan(self.body.angle)
-        ):
-            self.body.position = (100, 100)
+        if math.isnan(self.body.angle):
             self.body.angle = 0.0
+        if math.isnan(self.x) or math.isnan(self.y):
+            self.body.position = (100, 100)
 
-        self.image = pygame.transform.rotate(
-            self.original_image, math.degrees(-self.body.angle)
-        )
+        angle_deg = math.degrees(-self.body.angle) % 360
+        try:
+            self.image = pygame.transform.rotate(self.original_image, angle_deg)
+        except ValueError:
+            self.image = self.original_image
         self.mask = pygame.mask.from_surface(self.image)
         self.rect = self.image.get_rect(center=(int(self.x), int(self.y)))
 
@@ -347,19 +324,16 @@ class SmallBird(pygame.sprite.Sprite):
         return self.body.position.y
 
     def kill(self):
-        if self.shape in self.space.shapes:
+        if hasattr(self, "shape") and self.shape in self.space.shapes:
             self.space.remove(self.body, self.shape)
         super().kill()
 
     def update(self, dt, gravity, ground_level):
         event = None
-        if (
-            math.isnan(self.body.position.x)
-            or math.isnan(self.body.position.y)
-            or math.isnan(self.body.angle)
-        ):
-            self.body.position = (100, 100)
+        if math.isnan(self.body.angle):
             self.body.angle = 0.0
+        if math.isnan(self.x) or math.isnan(self.y):
+            self.body.position = (100, 100)
 
         if self.state == "flying":
             if self.y >= ground_level - self.size // 2:
@@ -372,9 +346,11 @@ class SmallBird(pygame.sprite.Sprite):
                 self.state = "dead"
                 self.kill()
 
-        self.image = pygame.transform.rotate(
-            self.original_image, math.degrees(-self.body.angle)
-        )
+        angle_deg = math.degrees(-self.body.angle) % 360
+        try:
+            self.image = pygame.transform.rotate(self.original_image, angle_deg)
+        except ValueError:
+            self.image = self.original_image
         self.mask = pygame.mask.from_surface(self.image)
         self.rect = self.image.get_rect(center=(int(self.x), int(self.y)))
         return event
@@ -396,7 +372,7 @@ class DefeatedPig(pygame.sprite.Sprite):
         moment = pymunk.moment_for_circle(mass, 0, radius)
         self.body = pymunk.Body(mass, moment)
         self.body.position = (x, y)
-        self.body.velocity = (random.uniform(-100, 100), vy * 60)
+        self.body.velocity = ((x % 200 - 100) * 2, vy * 60)
         self.shape = pymunk.Circle(self.body, radius)
         self.shape.elasticity = 0.3
         self.shape.friction = 0.9
@@ -415,13 +391,13 @@ class DefeatedPig(pygame.sprite.Sprite):
         return self.body.position.y
 
     def kill(self):
-        if self.shape in self.space.shapes:
+        if hasattr(self, "shape") and self.shape in self.space.shapes:
             self.space.remove(self.body, self.shape)
         super().kill()
 
     def update(self, dt, gravity, ground_level):
         event = None
-        if math.isnan(self.body.position.x) or math.isnan(self.body.position.y):
+        if math.isnan(self.x) or math.isnan(self.y):
             self.body.position = (100, 100)
 
         if not self.on_ground:
